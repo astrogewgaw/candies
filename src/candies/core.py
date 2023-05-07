@@ -1,18 +1,21 @@
 import h5py as h5
 import cupy as cp
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 
 from attrs import define
 from pathlib import Path
+from functools import cached_property
 from priwo.sigproc.hdr import readhdr
+from collections.abc import MutableSequence
 
 
 def delay(dm, fl, fh):
     return 4.1488064239e3 * dm * (fl**-2 - fh**-2)
 
 
-@define
+@define(slots=False)
 class Candy:
 
     """
@@ -20,7 +23,6 @@ class Candy:
     """
 
     nf: int
-    nt: int
     fl: float
     fh: float
     df: float
@@ -29,15 +31,16 @@ class Candy:
     t0: float
     ndms: int
     label: int
+    hsize: int
     snr: float
     wbin: float
     device: int
     fn: str | Path
-    data: np.ndarray
+    nt: int | None = None
     dmt: np.ndarray | None = None
 
     @classmethod
-    def get(
+    def make(
         cls,
         fn: str,
         dm: float,
@@ -58,30 +61,14 @@ class Candy:
         df = hdr["foff"]
         dt = hdr["tsamp"]
         nf = hdr["nchans"]
+        size = hdr["size"]
 
         df = np.abs(df)
         fl = fh - (df * nf)
-        ti = t0 - delay(dm, fl, fh) - (wbin * dt)
-        tf = t0 + delay(dm, fl, fh) + (wbin * dt)
-
-        nt = int((tf - ti) / dt)
-        with open(fn, "rb") as f:
-            f.seek(hdr["size"])
-            data = (
-                np.fromfile(
-                    f,
-                    dtype=np.uint8,
-                    count=(nt * nf),
-                    offset=(int(ti / dt) - 1) * nf,
-                )
-                .reshape(nt, nf)
-                .T
-            )
 
         return cls(
             fn=fn,
             dm=dm,
-            nt=nt,
             t0=t0,
             fh=fh,
             fl=fl,
@@ -91,10 +78,37 @@ class Candy:
             snr=snr,
             wbin=wbin,
             ndms=ndms,
-            data=data,
+            hsize=size,
             label=label,
             device=(0 if device is None else device),
         )
+
+    @cached_property
+    def data(self) -> np.ndarray:
+        """
+        Get the chunk of data associated with this candidate.
+        """
+
+        ti = self.t0 - delay(self.dm, self.fl, self.fh) - (self.wbin * self.dt)
+        tf = self.t0 + delay(self.dm, self.fl, self.fh) + (self.wbin * self.dt)
+
+        self.nt = int((tf - ti) / self.dt)
+        padding = int(-ti / self.dt) if ti < 0.0 else 0
+        nr = int((tf - (0.0 if ti < 0.0 else ti)) / self.dt)
+        with open(self.fn, "rb") as f:
+            f.seek(self.hsize)
+            data = (
+                np.fromfile(
+                    f,
+                    dtype=np.uint8,
+                    count=(nr * self.nf),
+                    offset=int(0.0 if ti < 0.0 else ti / self.dt) * self.nf,
+                )
+                .reshape(nr, self.nf)
+                .T
+            )
+            data = data if padding == 0 else np.pad(data, (padding, 0), mode="median")
+        return data
 
     @property
     def id(self) -> str:
@@ -127,10 +141,10 @@ class Candy:
         """
         Bin shifts for all channels and all DMs from 0.0 to twice this candy-date's DM.
         """
-        # TODO: We plan use a narrower DM range in the future, in order to make the DM
-        # v/s time bowties more prominent at lower frequencies, such as those used at
-        # the GMRT. We need to discuss how this range will be calculated, based on the
-        # frequency band of the observed data.
+        # TODO: We plan to use a narrower DM range in the future, in order to make the
+        # DM v/s time bowties more prominent at lower frequencies (such as those used
+        # at the GMRT). We need to discuss how this range will be calculated, based on
+        # the frequency band of the observed data.
         return np.vstack(
             [self.shifts(dm) for dm in np.linspace(0.0, 2 * self.dm, self.ndms)]
         )
@@ -139,15 +153,19 @@ class Candy:
         """
         Create and store the DM v/s time array.
         """
+        # TODO: Probably needs heavy optimisation.
         # TODO: Might need to decimate along the time axis.
         # TODO: Need to crop the array to 256 bins along the time axis.
-        ft = cp.asarray(self.data)
-        dmtx = cp.zeros((self.ndms, self.nt))
-        allshifts = cp.asarray(self.allshifts())
-        for ix in range(self.ndms):
-            for jx, shift in enumerate(allshifts[ix, :]):
-                dmtx[ix, :] += cp.pad(ft[jx, 0 + shift :], (0, int(shift)), mode="mean")
-        self.dmt = dmtx.get()
+        with cp.cuda.Device(self.device):
+            ft = cp.asarray(self.data)
+            dmtx = cp.zeros((self.ndms, self.nt))
+            allshifts = cp.asarray(self.allshifts())
+            for ix in range(self.ndms):
+                for jx, shift in enumerate(allshifts[ix, :]):
+                    dmtx[ix, :] += cp.pad(
+                        ft[jx, 0 + shift :], (0, int(shift)), mode="mean"
+                    )
+            self.dmt = dmtx.get()
 
     def plot(self) -> None:
         """
@@ -192,4 +210,53 @@ class Candy:
                 dset.dims[1].label = b"time"
 
 
-# TODO: Code to read in candidates from a CSV file.
+# TODO: Need to discuss and implement parallelisation across candidates.
+
+
+@define
+class Candies(MutableSequence):
+
+    """
+    Represents a list of candidates.
+    """
+
+    items: list[Candy]
+
+    def __len__(self):
+        return len(self.items)
+
+    def __getitem__(self, i):
+        return self.items[i]
+
+    def __delitem__(self, i):
+        del self.items[i]
+
+    def __setitem__(self, i, value):
+        self.items[i] = value
+
+    def insert(self, i, value):
+        self.items.insert(i, value)
+
+    @classmethod
+    def get(
+        cls,
+        fn: str,
+        ndms: int = 256,
+        device: int | None = None,
+    ):
+        df = pd.read_csv(fn)
+        return cls(
+            items=[
+                Candy.make(
+                    ndms=ndms,
+                    device=device,
+                    fn=str(row["file"]),
+                    dm=float(row["dm"]),
+                    snr=float(row["snr"]),
+                    t0=float(row["stime"]),
+                    wbin=int(row["width"]),
+                    label=int(row["label"]),
+                )
+                for _, row in df.iterrows()
+            ]
+        )
