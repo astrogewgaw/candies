@@ -1,0 +1,7 @@
+name = "Candies"
+uuid = "e6a2b965-781a-41dc-9357-5f25e78bbac6"
+authors = ["Ujjwal Panda <ujjwalpanda97@gmail.com> and contributors"]
+version = "0.0.1"
+
+[compat]
+julia = "1.8"
