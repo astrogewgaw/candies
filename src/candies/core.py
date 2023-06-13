@@ -1,3 +1,4 @@
+from numba import cuda
 import h5py as h5
 import cupy as cp
 import numpy as np
@@ -11,9 +12,20 @@ from priwo.sigproc.hdr import readhdr
 from collections.abc import MutableSequence
 
 
+
+
 def delay(dm, fl, fh):
     return 4.1488064239e3 * dm * (fl**-2 - fh**-2)
 
+@cuda.jit
+def compute_dmt(ft,dmtx,allshifts,nt):
+    # Thread id in a 1D block - ndms
+    tx = cuda.threadIdx.x
+    # Block id in a 1D grid - Freq
+    ty = cuda.blockIdx.x
+    # Add Sample to DMT
+    for n in range(nt):
+        cuda.atomic.add(dmtx, (tx,n),int(ft[ty,int((allshifts[tx,ty]+n) % nt)]))
 
 @define(slots=False)
 class Candy:
@@ -160,11 +172,13 @@ class Candy:
             ft = cp.asarray(self.data)
             dmtx = cp.zeros((self.ndms, self.nt))
             allshifts = cp.asarray(self.allshifts())
-            for ix in range(self.ndms):
-                for jx, shift in enumerate(allshifts[ix, :]):
-                    dmtx[ix, :] += cp.pad(
-                        ft[jx, 0 + shift :], (0, int(shift)), mode="mean"
-                    )
+
+            #### Set the block and thread size
+            blocks = self.allshifts().shape[1]
+            threads = self.ndms
+            # Call GPU Kernel
+            compute_dmt[blocks,threads](ft,dmtx,allshifts,self.nt)
+            
             self.dmt = dmtx.get()
 
     def plot(self) -> None:
