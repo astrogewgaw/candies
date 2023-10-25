@@ -22,9 +22,11 @@ def compute_dmt(dmtx, ft, nt, nf, df, dt, fh, ddm):
     itime = int(cuda.blockIdx.x)
 
     temp = 0
+    C1 = 4.1488064239e3 * (idm * ddm) / dt
+    C2 = C1 * fh**-2
     for ifreq in range(nf):
         f = fh - ifreq * df
-        shift = int(round(4.1488064239e3 * (idm * ddm) * (f**-2 - fh**-2) / dt))
+        shift = int(round(C1 * f**-2 - C2))
         if shift > nt:
             shift = 0
         index = shift + itime
