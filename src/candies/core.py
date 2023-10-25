@@ -17,16 +17,20 @@ def delay(dm, fl, fh):
 
 
 @cuda.jit
-def compute_dmt(ft, dmtx, allshifts, nt, nf):
+def compute_dmt(dmtx, ft, nt, nf, df, dt, fh, ddm):
     idm = int(cuda.threadIdx.x)
     itime = int(cuda.blockIdx.x)
 
     temp = 0
-    for f in range(nf):
-        index = allshifts[idm, f] + itime
+    for ifreq in range(nf):
+        f = fh - ifreq * df
+        shift = int(round(4.1488064239e3 * (idm * ddm) * (f**-2 - fh**-2) / dt))
+        if shift > nt:
+            shift = 0
+        index = shift + itime
         if index >= nt:
             index -= nt
-        temp += ft[f, index]
+        temp += ft[ifreq, index]
     dmtx[idm, itime] = temp
 
 
@@ -174,11 +178,19 @@ class Candy:
         with cp.cuda.Device(self.device):
             ft = cp.asarray(self.data)
             dmtx = cp.zeros((self.ndms, self.nt))
-            allshifts = cp.asarray(self.allshifts())
 
             blocks = self.nt
             threads = self.ndms
-            compute_dmt[blocks, threads](ft, dmtx, allshifts, self.nt, self.nf)
+            compute_dmt[blocks, threads](
+                dmtx,
+                ft,
+                self.nt,
+                self.nf,
+                (self.fh - self.fl) / (self.nf - 1),
+                self.dt,
+                self.fh,
+                2 * self.dm / (self.ndms - 1),
+            )
 
             self.dmt = dmtx.get()
 
