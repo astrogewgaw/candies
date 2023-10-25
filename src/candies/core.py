@@ -178,8 +178,8 @@ class Candy:
         # TODO: Might need to decimate along the time axis.
         # TODO: Need to crop the array to 256 bins along the time axis.
         with cp.cuda.Device(self.device):
-            ft = cp.asarray(self.data)
-            dmtx = cp.zeros((self.ndms, self.nt))
+            ft = cp.asarray(self.data, order="C")
+            dmtx = cp.zeros((self.ndms, self.nt), order="C")
 
             blocks = self.nt
             threads = self.ndms
