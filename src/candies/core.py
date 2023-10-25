@@ -1,10 +1,10 @@
-from numba import cuda
 import h5py as h5
 import cupy as cp
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from numba import cuda
 from attrs import define
 from pathlib import Path
 from functools import cached_property
@@ -12,20 +12,21 @@ from priwo.sigproc.hdr import readhdr
 from collections.abc import MutableSequence
 
 
-
-
 def delay(dm, fl, fh):
     return 4.1488064239e3 * dm * (fl**-2 - fh**-2)
 
+
 @cuda.jit
-def compute_dmt(ft,dmtx,allshifts,nt):
-    # Thread id in a 1D block - ndms
-    tx = cuda.threadIdx.x
-    # Block id in a 1D grid - Freq
-    ty = cuda.blockIdx.x
-    # Add Sample to DMT
-    for n in range(nt):
-        cuda.atomic.add(dmtx, (tx,n),int(ft[ty,int((allshifts[tx,ty]+n) % nt)]))
+def compute_dmt(ft, dmtx, allshifts, nt, nf):
+    idm = int(cuda.threadIdx.x)
+    itime = int(cuda.blockIdx.x)
+
+    for f in range(nf):
+        index = allshifts[idm, f] + itime
+        if index >= nt:
+            index -= nt
+        dmtx[idm, itime] += ft[f, index]
+
 
 @define(slots=False)
 class Candy:
@@ -84,9 +85,9 @@ class Candy:
             t0=t0,
             fh=fh,
             fl=fl,
-            df=df,
             dt=dt,
             nf=nf,
+            df=df,
             snr=snr,
             wbin=wbin,
             ndms=ndms,
@@ -142,7 +143,7 @@ class Candy:
         """
         return np.asarray(
             [
-                dbin
+                int(dbin)
                 if (dbin := np.round(delay(dm, f, self.fh) / self.dt)) < self.nt
                 else 0
                 for f in self.freqs
@@ -173,12 +174,10 @@ class Candy:
             dmtx = cp.zeros((self.ndms, self.nt))
             allshifts = cp.asarray(self.allshifts())
 
-            #### Set the block and thread size
-            blocks = self.allshifts().shape[1]
+            blocks = self.nt
             threads = self.ndms
-            # Call GPU Kernel
-            compute_dmt[blocks,threads](ft,dmtx,allshifts,self.nt)
-            
+            compute_dmt[blocks, threads](ft, dmtx, allshifts, self.nt, self.nf)
+
             self.dmt = dmtx.get()
 
     def plot(self) -> None:
