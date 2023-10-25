@@ -21,11 +21,13 @@ def compute_dmt(ft, dmtx, allshifts, nt, nf):
     idm = int(cuda.threadIdx.x)
     itime = int(cuda.blockIdx.x)
 
+    temp = 0
     for f in range(nf):
         index = allshifts[idm, f] + itime
         if index >= nt:
             index -= nt
-        dmtx[idm, itime] += ft[f, index]
+        temp += ft[f, index]
+    dmtx[idm, itime] = temp
 
 
 @define(slots=False)
