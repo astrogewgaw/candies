@@ -58,6 +58,8 @@ def fastdmt(
     dt: float,
     fh: float,
     ddm: float,
+    dmlow: float,
+    tfactor: int,
 ):
     """
     The JIT-compiled GPU kernel for creating the DM v/s time array.
@@ -65,8 +67,8 @@ def fastdmt(
     ti = int(cuda.blockIdx.x)  # type: ignore
     dmi = int(cuda.threadIdx.x)  # type: ignore
 
-    acc = 0
-    k1 = kdm * (dmi * ddm) / dt
+    acc = 0.0
+    k1 = kdm * (dmlow + dmi * ddm) / dt
     k2 = k1 * fh**-2
     for fi in range(nf):
         f = fh - fi * df
@@ -77,7 +79,7 @@ def fastdmt(
         if xti >= nt:
             xti -= nt
         acc += ft[fi, xti]
-    dmt[dmi, ti] = acc
+    dmt[dmi, int(ti / tfactor)] = acc
 
 
 def main(
@@ -86,6 +88,8 @@ def main(
     device: int = 0,
     save: bool = False,
     plot: bool = False,
+    noshow: bool = False,
+    saveplot: bool = False,
 ):
     """
     The main Candies program.
@@ -127,7 +131,7 @@ def main(
         ti = t0 - maxdelay - (wbin * dt)
         tf = t0 + maxdelay + (wbin * dt)
 
-        _, _, dm_min, dm_max = dmt_extent(
+        _, _, dmlow, dmhigh = dmt_extent(
             fl,
             fh,
             dt,
@@ -135,6 +139,7 @@ def main(
             dm,
             wbin,
         )
+        ddm = (dmhigh - dmlow) / (ndms - 1)
 
         nt = int((tf - ti) / dt)
         with open(fn, "rb") as f:
@@ -151,6 +156,12 @@ def main(
                 (int(-ti / dt) if ti < 0.0 else 0, 0),
                 mode="median",
             )
+        nf, nt = data.shape
+
+        if np.log2(wbin) < 3:
+            tfactor = 1
+        else:
+            tfactor = np.log2(wbin) // 2
 
         with cp.cuda.Device(device):
             ft = cp.asarray(data, order="C")
@@ -163,13 +174,19 @@ def main(
                 df,
                 dt,
                 fh,
-                (dm_max - dm_min) / (ndms - 1),
+                ddm,
+                dmlow,
+                tfactor,
             )
             dmt = dmtx.get()
+            ntmid = int(nt / 2)
+            ticrop = ntmid - 128
+            tfcrop = ntmid + 128
+            dmt = dmt[:, ticrop:tfcrop]
 
         cand_id = f"candy_t0{t0:.7f}_dm{dm:.5f}_snr{snr:.5f}"
 
-        if plot:
+        if plot and (saveplot or (not noshow)):
             plt.xlabel("Time (in s)")
             plt.suptitle("DM v/s t Plot")
             plt.ylabel("DM (in pc cm$^-3$)")
@@ -177,9 +194,14 @@ def main(
                 dmt,
                 aspect="auto",
                 interpolation="none",
-                extent=[ti, tf, 2 * dm, 0.0],
+                extent=[ticrop, tfcrop, dmhigh, dmlow],
             )
-            plt.savefig(f"{cand_id}.png", dpi=300)
+            if saveplot:
+                plt.savefig(f"{cand_id}.png", dpi=300)
+            if not noshow:
+                plt.show()
+        else:
+            print("Not plotting since `saveplot` is off and `noshow` is on.")
 
         if save:
             with h5.File(f"{cand_id}.h5", "w") as f:
