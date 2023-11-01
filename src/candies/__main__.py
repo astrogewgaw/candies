@@ -3,8 +3,8 @@ import typer
 import h5py as h5
 import numpy as np
 import priwo as pw
-import numba.cuda as cuda
-import matplotlib.pyplot as plt
+import proplot as pplt
+from numba import cuda
 
 
 kdm: float = 4.1488064239e3
@@ -48,6 +48,34 @@ def dmt_extent(
 
 
 @cuda.jit
+def dedisperse(
+    dyn,
+    ft,
+    nf: int,
+    nt: int,
+    df: float,
+    dt: float,
+    fh: float,
+    dm: float,
+    ffactor: float,
+    tfactor: float,
+):
+    fi, ti = cuda.grid(2)  # type: ignore
+
+    if fi < nf and ti < nt:
+        k1 = kdm * dm / dt
+        k2 = k1 * fh**-2
+        f = fh - fi * df
+        dbin = int(round(k1 * f**-2 - k2))
+        if dbin >= nt:
+            dbin = 0
+        xti = ti + dbin
+        if xti >= nt:
+            xti -= nt
+        cuda.atomic.add(dyn, (int(fi / ffactor), int(ti / tfactor)), ft[fi, xti])  # type: ignore
+
+
+@cuda.jit
 def fastdmt(
     dmt,
     ft,
@@ -87,7 +115,7 @@ def main(
     device: int = 0,
     save: bool = False,
     plot: bool = False,
-    noshow: bool = False,
+    showplot: bool = True,
     saveplot: bool = False,
 ):
     """
@@ -157,15 +185,39 @@ def main(
             )
         nf, nt = data.shape
 
-        if np.log2(wbin) < 3:
-            tfactor = 1
-        else:
-            tfactor = np.log2(wbin) // 2
+        tfactor = 1 if np.log2(wbin) < 3 else np.log2(wbin) // 2
+        ffactor = np.floor(nf // 256).astype(int)
+        nfdown = int(nf / ffactor)
+        ntdown = int(nt / tfactor)
 
         cuda.select_device(device)
-        ft = cuda.to_device(data)
-        dmtx = cuda.device_array((ndms, nt), order="C")
-        fastdmt[nt, ndms](  # type: ignore
+        stream = cuda.stream()
+        ft = cuda.to_device(data, stream=stream)
+        dmtx = cuda.device_array((ndms, ntdown), order="C", stream=stream)
+        dynx = cuda.to_device(np.zeros((nfdown, ntdown), order="C"), stream=stream)
+
+        dedisperse[  # type: ignore
+            (nf // 32, nt // 32),
+            (32, 32),
+            stream,
+        ](
+            dynx,
+            ft,
+            nf,
+            nt,
+            df,
+            dt,
+            fh,
+            dm,
+            ffactor,
+            tfactor,
+        )
+
+        fastdmt[  # type: ignore
+            nt,
+            ndms,
+            stream,
+        ](
             dmtx,
             ft,
             nf,
@@ -177,32 +229,18 @@ def main(
             dmlow,
             tfactor,
         )
-        dmt = dmtx.copy_to_host()
+
+        dyn = dynx.copy_to_host(stream=stream)
+        dmt = dmtx.copy_to_host(stream=stream)
         cuda.close()
 
         ntmid = int(nt / 2)
-        ticrop = ntmid - 128
-        tfcrop = ntmid + 128
-        dmt = dmt[:, ticrop:tfcrop]
+        nticrop = ntmid - 128
+        ntfcrop = ntmid + 128
+        dmt = dmt[:, nticrop:ntfcrop]
+        dyn = dyn[:, nticrop:ntfcrop]
 
         cand_id = f"candy_t0{t0:.7f}_dm{dm:.5f}_snr{snr:.5f}"
-
-        if plot and (saveplot or (not noshow)):
-            plt.xlabel("Time (in s)")
-            plt.suptitle("DM v/s t Plot")
-            plt.ylabel("DM (in pc cm$^-3$)")
-            plt.imshow(
-                dmt,
-                aspect="auto",
-                interpolation="none",
-                extent=[ticrop, tfcrop, dmhigh, dmlow],
-            )
-            if saveplot:
-                plt.savefig(f"{cand_id}.png", dpi=300)
-            if not noshow:
-                plt.show()
-        else:
-            print("Not plotting since `saveplot` is off and `noshow` is on.")
 
         if save:
             with h5.File(f"{cand_id}.h5", "w") as f:
@@ -226,6 +264,46 @@ def main(
                 )
                 dset.dims[0].label = b"dm"
                 dset.dims[1].label = b"time"
+
+        if plot and (saveplot or showplot):
+            fig = pplt.figure(share=False)
+            axs = fig.subplots(nrows=3, ncols=1)
+
+            ts = dyn.sum(axis=0)
+            t = np.linspace(nticrop * dt, ntfcrop * dt, 256)
+
+            axs[0].plot(t, ts)
+
+            axs[1].imshow(
+                dyn,
+                aspect="auto",
+                interpolation="none",
+                extent=[t[0], t[-1], fh, fl],
+            )
+
+            axs[1].format(
+                xlabel="Time (in s)",
+                title="Dynamic spectrum",
+                ylabel="Frequency (in MHz)",
+            )
+
+            axs[2].imshow(
+                dmt,
+                aspect="auto",
+                interpolation="none",
+                extent=[t[0], t[-1], dmhigh, dmlow],
+            )
+
+            axs[2].format(
+                xlabel="Time (in s)",
+                title="DM v/s t Plot",
+                ylabel="DM (in pc cm$^-3$)",
+            )
+
+            if saveplot:
+                fig.save(f"{cand_id}.png", dpi=300)  # type: ignore
+            if showplot:
+                pplt.show()
 
 
 if __name__ == "__main__":
