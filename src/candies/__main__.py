@@ -1,6 +1,5 @@
 import csv
 import typer
-import cupy as cp  # type: ignore
 import h5py as h5
 import numpy as np
 import priwo as pw
@@ -163,26 +162,28 @@ def main(
         else:
             tfactor = np.log2(wbin) // 2
 
-        with cp.cuda.Device(device):
-            ft = cp.asarray(data, order="C")
-            dmtx = cp.zeros((ndms, nt), order="C")
-            fastdmt[nt, ndms](  # type: ignore
-                dmtx,
-                ft,
-                nf,
-                nt,
-                df,
-                dt,
-                fh,
-                ddm,
-                dmlow,
-                tfactor,
-            )
-            dmt = dmtx.get()
-            ntmid = int(nt / 2)
-            ticrop = ntmid - 128
-            tfcrop = ntmid + 128
-            dmt = dmt[:, ticrop:tfcrop]
+        cuda.select_device(device)
+        ft = cuda.to_device(data)
+        dmtx = cuda.device_array((ndms, nt), order="C")
+        fastdmt[nt, ndms](  # type: ignore
+            dmtx,
+            ft,
+            nf,
+            nt,
+            df,
+            dt,
+            fh,
+            ddm,
+            dmlow,
+            tfactor,
+        )
+        dmt = dmtx.copy_to_host()
+        cuda.close()
+
+        ntmid = int(nt / 2)
+        ticrop = ntmid - 128
+        tfcrop = ntmid + 128
+        dmt = dmt[:, ticrop:tfcrop]
 
         cand_id = f"candy_t0{t0:.7f}_dm{dm:.5f}_snr{snr:.5f}"
 
