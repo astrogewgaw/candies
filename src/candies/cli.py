@@ -8,7 +8,15 @@ from candies.utilities import dmt_extent
 from candies.core import Candies, Filterbank
 from candies.kernels import fastdmt, dedisperse
 
-app = typer.Typer(help="`candies`: Sweet, sweet candy-dates!")
+app = typer.Typer(no_args_is_help=True)
+
+
+@app.callback()
+def main():
+    """
+    candies: Sweet, sweet candy-dates!
+    """
+    pass
 
 
 @app.command()
@@ -28,24 +36,21 @@ def make(
     ndms: Annotated[
         int,
         typer.Option(
-            default=256,
             help="The number of DMs to use for the DM v/s time array.",
         ),
-    ],
+    ] = 256,
     device: Annotated[
         int,
         typer.Option(
-            default=0,
             help="The GPU device ID.",
         ),
-    ],
+    ] = 0,
     save: Annotated[
         bool,
         typer.Option(
-            default=True,
             help="If specified, save candidates to disk.",
         ),
-    ],
+    ] = True,
 ):
     """
     Make features for all candy-dates.
@@ -162,9 +167,9 @@ def make(
 
 
 @app.command()
-def display():
+def view():
     """
-    Display candy-date(s).
+    View candy-date(s).
     """
     pass
 
