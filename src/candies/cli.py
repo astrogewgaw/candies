@@ -64,6 +64,8 @@ def make(
     candies = Candies.wrap(candidates)
 
     cuda.select_device(device)
+    stream = cuda.stream()
+
     for candy in track(candies, description="Processing candy-dates..."):
         data = fil.chop(candy)
         _, nt = data.shape
@@ -84,7 +86,6 @@ def make(
         nfdown = int(fil.nf / ffactor)
         ntdown = int(nt / tfactor)
 
-        stream = cuda.stream()
         ft = cuda.to_device(data, stream=stream)
         dmtx = cuda.device_array((ndms, ntdown), order="C", stream=stream)
         dynx = cuda.to_device(np.zeros((nfdown, ntdown), order="C"), stream=stream)
