@@ -3,18 +3,19 @@ import h5py as h5
 import numpy as np
 from numba import cuda
 from pathlib import Path
+from rich.progress import track
 from typing_extensions import Annotated
 from candies.utilities import dmt_extent
 from candies.core import Candies, Filterbank
 from candies.kernels import fastdmt, dedisperse
 
-app = typer.Typer(no_args_is_help=True)
+app = typer.Typer(no_args_is_help=True, rich_markup_mode="rich")
 
 
 @app.callback()
 def main():
     """
-    candies: Sweet, sweet candy-dates!
+    [b]Sweet, sweet candy-dates![/b]
     """
     pass
 
@@ -23,7 +24,11 @@ def main():
 def make(
     candidates: Annotated[
         Path,
-        typer.Argument(help="The list of candidates to process."),
+        typer.Option(
+            "-c",
+            "--cands",
+            help="The list of candidates to process.",
+        ),
     ],
     filterbank: Annotated[
         Path,
@@ -58,7 +63,8 @@ def make(
     fil = Filterbank.from_sigproc(filterbank)
     candies = Candies.wrap(candidates)
 
-    for candy in candies:
+    cuda.select_device(device)
+    for candy in track(candies, description="Processing candy-dates..."):
         data = fil.chop(candy)
         _, nt = data.shape
 
@@ -77,8 +83,6 @@ def make(
         ffactor = np.floor(fil.nf // 256).astype(int)
         nfdown = int(fil.nf / ffactor)
         ntdown = int(nt / tfactor)
-
-        cuda.select_device(device)
 
         stream = cuda.stream()
         ft = cuda.to_device(data, stream=stream)
@@ -122,8 +126,6 @@ def make(
         dyn = dynx.copy_to_host(stream=stream)
         dmt = dmtx.copy_to_host(stream=stream)
 
-        cuda.close()
-
         ntmid = int(nt / 2)
         nticrop = ntmid - 128
         ntfcrop = ntmid + 128
@@ -164,6 +166,7 @@ def make(
                 )
                 dset.dims[0].label = b"dm"
                 dset.dims[1].label = b"time"
+    cuda.close()
 
 
 @app.command()
