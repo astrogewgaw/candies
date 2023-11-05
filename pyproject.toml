@@ -1,9 +1,5 @@
 [build-system]
-requires = [
-    "wheel",
-    "setuptools>=45",
-    "setuptools_scm[toml]>=6.0",
-]
+requires = ["wheel", "setuptools>=45", "setuptools_scm[toml]>=6.0"]
 
 [tool.setuptools_scm]
 write_to = "src/candies/_version.py"
@@ -27,13 +23,12 @@ ignore-nested-classes = true
 badge-style = "for-the-badge"
 ignore-nested-functions = false
 ignore-property-decorators = false
-generate-badge = "assets/docs_cov.svg"
+generate-badge = "assets/interrogate.svg"
 exclude = [
-    "docs",
-    "tests",
-    "build",
-    "assets",
-    "setup.py",
-    "src/candies/_version.py",
+  "docs",
+  "tests",
+  "build",
+  "assets",
+  "setup.py",
+  "src/candies/_version.py",
 ]
-

@@ -1,3 +1,7 @@
+"""
+Generally applicable code for Candies.
+"""
+
 import mmap
 import numpy as np
 from attrs import define
@@ -15,11 +19,19 @@ from candies.utilities import (
 
 
 class CandiesError(Exception):
+    """
+    All errors are CandiesErrors here.
+    """
+
     pass
 
 
 @define
 class Candy:
+    """
+    Represents a candy-date.
+    """
+
     t0: float
     dm: float
     wbin: int
@@ -35,15 +47,25 @@ class Candy:
         snr: float,
         wbin: int | float,
     ) -> Self:
+        """
+        Create and wrap up a candy-date.
+        """
         return cls(t0=t0, dm=dm, snr=snr, wbin=int(wbin))
 
     @property
     def id(self) -> str:
-        return f"candy_t0{self.t0:.7f}_dm{self.dm:.5f}_snr{self.snr:.5f}"
+        """
+        The candy-date's ID.
+        """
+        return f"T{self.t0:.7f}DM{self.dm:.5f}SNR{self.snr:.5f}"
 
 
 @define
 class Candies(MutableSequence):
+    """
+    Represents a sequence of candy-dates.
+    """
+
     items: list[Candy]
 
     def __len__(self):
@@ -63,6 +85,9 @@ class Candies(MutableSequence):
 
     @classmethod
     def wrap(cls, f: str | Path) -> Self:
+        """
+        Create and wrap up candy-dates.
+        """
         ext = Path(f).suffix
         if ext == ".csv":
             values = read_csv(f)
@@ -77,6 +102,10 @@ class Candies(MutableSequence):
 
 @define
 class Filterbank:
+    """
+    Represents filterbank data.
+    """
+
     nf: int
     nt: int
     df: float
@@ -90,6 +119,9 @@ class Filterbank:
 
     @classmethod
     def from_sigproc(cls, f: str | Path) -> Self:
+        """
+        Create a Filterbank instance from a SIGPROC filterbank file.
+        """
         m = readhdr(f)
         ff = open(f, "rb")
         mm = mmap.mmap(
@@ -112,6 +144,15 @@ class Filterbank:
         return cls(nf, nt, df, dt, bw, fh, fl, tobs, skip, mm)
 
     def chop(self, candy: Candy) -> np.ndarray:
+        """
+        Chop out a time slice for a particular candy-date.
+
+        This is done by taking the maximum delay at the candy-date's DM
+        and width into account, and then chopping out a time slice around
+        the candy-date's arrival time. In case the burst is close to the
+        start or end of the file, and enough data is not available, this
+        function will pad the array with median values.
+        """
         maxdd = dispersive_delay(self.fl, self.fh, candy.dm)
         ti = candy.t0 - maxdd - (candy.wbin * self.dt)
         tf = candy.t0 + maxdd + (candy.wbin * self.dt)

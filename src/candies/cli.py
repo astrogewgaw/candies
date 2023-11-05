@@ -1,3 +1,7 @@
+"""
+Code for the Candies CLI.
+"""
+
 import typer
 import warnings
 import h5py as h5
@@ -163,13 +167,12 @@ def make(
         ntfcrop = ntmid + 128
         dmt = dmt[:, nticrop:ntfcrop]
         dyn = dyn[:, nticrop:ntfcrop]
-        id = f"T{candy.t0:.7f}DM{candy.dm:.5f}SNR{candy.snr:.5f}"
 
         if save:
-            with h5.File(f"{id}.h5", "w") as f:
-                f.attrs["id"] = id
+            with h5.File(f"{candy.id}.h5", "w") as f:
                 f.attrs["nt"] = nt
                 f.attrs["ndms"] = ndms
+                f.attrs["id"] = candy.id
                 f.attrs["dmlow"] = dmlow
                 f.attrs["dmhigh"] = dmhigh
 
@@ -200,14 +203,6 @@ def make(
                 dset.dims[0].label = b"dm"
                 dset.dims[1].label = b"time"
     cuda.close()
-
-
-@app.command()
-def view():
-    """
-    View candy-date(s).
-    """
-    pass
 
 
 @app.command()

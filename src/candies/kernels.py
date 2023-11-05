@@ -1,3 +1,8 @@
+"""
+GPU kernels for Candies.
+"""
+
+
 from numba import cuda
 from candies.utilities import kdm
 
@@ -15,6 +20,9 @@ def dedisperse(
     ffactor: float,
     tfactor: float,
 ):
+    """
+    The JIT-compiled GPU kernel for dedispersing the dynamic spectrum via rolling.
+    """
     fi, ti = cuda.grid(2)  # type: ignore
 
     if fi < nf and ti < nt:

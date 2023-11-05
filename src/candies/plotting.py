@@ -1,3 +1,7 @@
+"""
+Plotting utilities for Candies.
+"""
+
 import h5py as h5
 import numpy as np
 import proplot as pplt
@@ -9,6 +13,9 @@ def plot_candy(
     save: bool = True,
     show: bool = False,
 ):
+    """
+    Plot a candy-date.
+    """
     with h5.File(hf, "r") as f:
         id = f.attrs["id"]
         nt = f.attrs["nt"]

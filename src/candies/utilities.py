@@ -1,3 +1,7 @@
+"""
+Miscellaneous utilities for Candies.
+"""
+
 import csv
 import numpy as np
 from pathlib import Path
@@ -43,6 +47,9 @@ def dmt_extent(
 
 
 def read_csv(f: str | Path) -> list[dict[str, int | float]]:
+    """
+    Read in candy-dates from a CSV file.
+    """
     with open(f, "r") as fp:
         return [
             {
@@ -56,6 +63,9 @@ def read_csv(f: str | Path) -> list[dict[str, int | float]]:
 
 
 def read_presto(f: str | Path) -> list[dict[str, int | float]]:
+    """
+    Read in candy-dates from a PRESTO *.singlepulse file.
+    """
     return [
         {
             "t0": float(row[2]),
@@ -68,6 +78,9 @@ def read_presto(f: str | Path) -> list[dict[str, int | float]]:
 
 
 def read_astroaccelerate(f: str | Path) -> list[dict[str, int | float]]:
+    """
+    Read in candy-dates from an AstroAccelerate *.dat file.
+    """
     return [
         {
             "t0": float(row[1]),
