@@ -3,24 +3,6 @@ import numpy as np
 import proplot as pplt
 from pathlib import Path
 
-pplt.rc.update(
-    {
-        "font.size": 12,
-        "title.loc": "ul",
-        "cycle": "tab20b",
-        "suptitle.pad": 20,
-        "text.usetex": False,
-        "axes.linewidth": 2.5,
-        "tick.linewidth": 2.5,
-        "subplots.tight": True,
-        "subplots.share": True,
-        "hatch.linewidth": 2.0,
-        "subplots.refwidth": 5.0,
-        "subplots.panelpad": 1.5,
-        "agg.path.chunksize": 100000,
-    }
-)
-
 
 def plot_candy(
     hf: str | Path,
@@ -47,19 +29,15 @@ def plot_candy(
         fig, axs = pplt.subplots(
             nrows=2,
             ncols=1,
-            width=25,
-            height=15,
+            width=5,
+            height=10,
             sharey=False,
             sharex="labels",
         )
 
         px = axs[0].panel_axes("t", width="5em")
         px.plot(t, ts)
-        px.format(
-            xlabel="Time (in s)",
-            ylabel="Flux (arb. units)",
-            title="Dedispersed time series",
-        )
+        px.format(xlabel="Time (in s)", ylabel="Flux (arb. units)")
 
         axs[0].imshow(
             dyn,
