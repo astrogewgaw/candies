@@ -1,4 +1,5 @@
 import typer
+import warnings
 import h5py as h5
 import numpy as np
 from numba import cuda
@@ -10,7 +11,15 @@ from candies.utilities import dmt_extent
 from candies.core import Candies, Filterbank
 from candies.kernels import fastdmt, dedisperse
 
-app = typer.Typer(no_args_is_help=True, rich_markup_mode="rich")
+
+# Forbidden jutsu: disable all warnings.
+warnings.filterwarnings("ignore")
+
+
+app = typer.Typer(
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
 
 
 @app.callback()
@@ -26,6 +35,11 @@ def make(
     candidates: Annotated[
         Path,
         typer.Argument(
+            exists=True,
+            readable=True,
+            file_okay=True,
+            dir_okay=False,
+            allow_dash=True,
             help="The list of candidates to process.",
         ),
     ],
@@ -34,12 +48,18 @@ def make(
         typer.Option(
             "-f",
             "--fil",
+            exists=True,
+            readable=True,
+            file_okay=True,
+            dir_okay=False,
+            allow_dash=True,
             help="The filterbank file to process.",
         ),
     ],
     ndms: Annotated[
         int,
         typer.Option(
+            rich_help_panel="Configure",
             help="The number of DMs to use for the DM v/s time array.",
         ),
     ] = 256,
@@ -47,12 +67,21 @@ def make(
         int,
         typer.Option(
             help="The GPU device ID.",
+            rich_help_panel="Configure",
         ),
     ] = 0,
     save: Annotated[
         bool,
         typer.Option(
+            rich_help_panel="Configure",
             help="If specified, save candidates to disk.",
+        ),
+    ] = True,
+    zoom: Annotated[
+        bool,
+        typer.Option(
+            rich_help_panel="Configure",
+            help="If specified, employ the DMT zoom feature",
         ),
     ] = True,
 ):
@@ -69,14 +98,17 @@ def make(
         data = fil.chop(candy)
         _, nt = data.shape
 
-        _, _, dmlow, dmhigh = dmt_extent(
-            fil.fl,
-            fil.fh,
-            fil.dt,
-            candy.t0,
-            candy.dm,
-            candy.wbin,
-        )
+        if zoom:
+            _, _, dmlow, dmhigh = dmt_extent(
+                fil.fl,
+                fil.fh,
+                fil.dt,
+                candy.t0,
+                candy.dm,
+                candy.wbin,
+            )
+        else:
+            dmlow, dmhigh = 0.0, 2.0 * candy.dm
 
         ddm = (dmhigh - dmlow) / (ndms - 1)
 
@@ -182,7 +214,14 @@ def view():
 def plot(
     candidates: Annotated[
         list[Path],
-        typer.Argument(help="The candidates to plot."),
+        typer.Argument(
+            exists=True,
+            readable=True,
+            file_okay=True,
+            dir_okay=False,
+            allow_dash=True,
+            help="The candidates to plot.",
+        ),
     ],
     save: Annotated[
         bool,
@@ -200,5 +239,8 @@ def plot(
     """
     Plot candy-date(s).
     """
-    for candidate in track(candidates, description="Plotting..."):
-        plot_candy(candidate, save=save, show=show)
+    if len(candidates) > 1:
+        for candidate in track(candidates, description="Plotting..."):
+            plot_candy(candidate, save=save, show=show)
+    else:
+        plot_candy(candidates[0], save=save, show=show)
