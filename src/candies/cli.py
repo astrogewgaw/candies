@@ -5,6 +5,7 @@ from numba import cuda
 from pathlib import Path
 from rich.progress import track
 from typing_extensions import Annotated
+from candies.plotting import plot_candy
 from candies.utilities import dmt_extent
 from candies.core import Candies, Filterbank
 from candies.kernels import fastdmt, dedisperse
@@ -24,9 +25,7 @@ def main():
 def make(
     candidates: Annotated[
         Path,
-        typer.Option(
-            "-c",
-            "--cands",
+        typer.Argument(
             help="The list of candidates to process.",
         ),
     ],
@@ -127,34 +126,35 @@ def make(
         dyn = dynx.copy_to_host(stream=stream)
         dmt = dmtx.copy_to_host(stream=stream)
 
-        ntmid = int(nt / 2)
+        ntmid = int(ntdown / 2)
         nticrop = ntmid - 128
         ntfcrop = ntmid + 128
         dmt = dmt[:, nticrop:ntfcrop]
         dyn = dyn[:, nticrop:ntfcrop]
-
         id = f"T{candy.t0:.7f}DM{candy.dm:.5f}SNR{candy.snr:.5f}"
 
         if save:
             with h5.File(f"{id}.h5", "w") as f:
-                f["id"] = id
-                f["nt"] = nt
-                f["ndms"] = ndms
+                f.attrs["id"] = id
+                f.attrs["nt"] = nt
+                f.attrs["ndms"] = ndms
+                f.attrs["dmlow"] = dmlow
+                f.attrs["dmhigh"] = dmhigh
 
-                f["nf"] = fil.nf
-                f["dt"] = fil.dt
-                f["df"] = fil.df
-                f["fl"] = fil.fl
-                f["fh"] = fil.fh
+                f.attrs["nf"] = fil.nf
+                f.attrs["dt"] = fil.dt
+                f.attrs["df"] = fil.df
+                f.attrs["fl"] = fil.fl
+                f.attrs["fh"] = fil.fh
 
-                f["t0"] = candy.t0
-                f["dm"] = candy.dm
-                f["snr"] = candy.snr
-                f["wbin"] = candy.wbin
+                f.attrs["t0"] = candy.t0
+                f.attrs["dm"] = candy.dm
+                f.attrs["snr"] = candy.snr
+                f.attrs["wbin"] = candy.wbin
 
                 dset = f.create_dataset(
                     "dyn",
-                    data=dmt,
+                    data=dyn,
                     compression="gzip",
                     compression_opts=9,
                 )
@@ -179,8 +179,26 @@ def view():
 
 
 @app.command()
-def plot():
+def plot(
+    candidates: Annotated[
+        list[Path],
+        typer.Argument(help="The candidates to plot."),
+    ],
+    save: Annotated[
+        bool,
+        typer.Option(
+            help="If specified, save plot to disk.",
+        ),
+    ] = True,
+    show: Annotated[
+        bool,
+        typer.Option(
+            help="If specified, show the plot.",
+        ),
+    ] = True,
+):
     """
     Plot candy-date(s).
     """
-    pass
+    for candidate in track(candidates, description="Plotting..."):
+        plot_candy(candidate, save=save, show=show)

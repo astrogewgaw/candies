@@ -78,11 +78,14 @@ class Candies(MutableSequence):
 @define
 class Filterbank:
     nf: int
+    nt: int
     df: float
     dt: float
     bw: float
     fh: float
     fl: float
+    tobs: float
+    _skip: int
     _mm: mmap.mmap
 
     @classmethod
@@ -98,10 +101,15 @@ class Filterbank:
         fh = m["fch1"]
         dt = m["tsamp"]
         nf = m["nchans"]
+        skip = m["size"]
         df = np.abs(m["foff"])
+
+        nt = int(mm.size() - skip)
+        tobs = nt * dt
         bw = nf * df
         fl = fh - bw + 0.5 * df
-        return cls(nf, df, dt, bw, fh, fl, mm)
+
+        return cls(nf, nt, df, dt, bw, fh, fl, tobs, skip, mm)
 
     def chop(self, candy: Candy) -> np.ndarray:
         maxdd = dispersive_delay(self.fl, self.fh, candy.dm)
@@ -112,10 +120,16 @@ class Filterbank:
                 self._mm,
                 dtype=np.uint8,
                 count=int((tf - (0.0 if ti < 0.0 else ti)) / self.dt) * self.nf,
-                offset=int(0.0 if ti < 0.0 else ti / self.dt) * self.nf,
+                offset=int(0.0 if ti < 0.0 else ti / self.dt) * self.nf + self._skip,
             )
             .reshape(-1, self.nf)
             .T,
-            (int(-ti / self.dt) if ti < 0.0 else 0, 0),
+            (
+                (0, 0),
+                (
+                    int(-ti / self.dt) if ti < 0.0 else 0,
+                    int((tf - self.tobs) / self.dt) if tf > self.tobs else 0,
+                ),
+            ),
             mode="median",
         )
