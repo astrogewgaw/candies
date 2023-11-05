@@ -13,7 +13,6 @@ The font used in the above logo is [**Candyday**][candyday] by [**Billy Argel**]
 ![License][license-badge]
 ![Version][version-badge]
 
-![Documentation Status][docs-badge]
 ![Python versions][pyversions-badge]
 [![Interrogate][interrogate-badge]][interrogate]
 
@@ -120,6 +119,5 @@ Once more, type `candies plot --help` to see what options are available to you.
 [issues-badge]: https://img.shields.io/github/issues/astrogewgaw/candies?style=for-the-badge
 [license-badge]: https://img.shields.io/github/license/astrogewgaw/candies?style=for-the-badge
 [black-badge]: https://img.shields.io/badge/code%20style-black-000000.svg?style=for-the-badge
-[docs-badge]: https://readthedocs.org/projects/candies/badge/?version=latest&style=for-the-badge
 [gitmoji-badge]: https://img.shields.io/badge/gitmoji-%20😜%20😍-FFDD67.svg?style=for-the-badge
 [interrogate-badge]: https://raw.githubusercontent.com/astrogewgaw/candies/main/assets/interrogate.svg
