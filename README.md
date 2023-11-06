@@ -3,11 +3,13 @@
 
 ![The `candies` logo.][logo]
 
-<center><small>
+<center>
+<sup>
 
 The font used in the above logo is [**Candyday**][candyday] by [**Billy Argel**][billyargel].
 
-</small></center>
+</sup>
+</center>
 <br/>
 
 ![License][license-badge]
@@ -78,13 +80,13 @@ pip install git+https://github.com/astrogewgaw/candies
 For help with how to use candies, just type and run `candies` or `candies --help`. To process a list of FRB candidates stored as either a CSV file, a `PRESTO` `*.singlepulse` file, or an AstroAccelerate `*.dat` file, just use the command:
 
 ```bash
-candies make </path/to/candidate/list> -f </path/to/rawdata/file>
+candies make /path/to/candidate/list -f /path/to/rawdata/file
 ```
 
 To see what additional options you can use, just type `candies make --help`. To plot one or several HDF5 files generated as output, just run:
 
 ```bash
-candies plot </path/to/HDF5/files>
+candies plot /path/to/HDF5/files
 ```
 
 Once more, type `candies plot --help` to see what options are available to you.
