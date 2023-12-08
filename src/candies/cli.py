@@ -187,21 +187,23 @@ def make(
                 f.attrs["snr"] = candy.snr
                 f.attrs["wbin"] = candy.wbin
 
-                dset = f.create_dataset(
-                    "dyn",
+                ftset = f.create_dataset(
+                    "data_freq_time",
                     data=dyn,
                     compression="gzip",
                     compression_opts=9,
                 )
+                ftset.dims[0].label = b"time"
+                ftset.dims[1].label = b"frequency"
 
-                dset = f.create_dataset(
-                    "dmt",
+                dmtset = f.create_dataset(
+                    "data_dm_time",
                     data=dmt,
                     compression="gzip",
                     compression_opts=9,
                 )
-                dset.dims[0].label = b"dm"
-                dset.dims[1].label = b"time"
+                dmtset.dims[0].label = b"dm"
+                dmtset.dims[1].label = b"time"
     cuda.close()
 
 
