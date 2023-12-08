@@ -7,6 +7,16 @@ import numpy as np
 import proplot as pplt
 from pathlib import Path
 
+pplt.rc.update(
+    {
+        "font.size": 20,
+        "suptitle.pad": 20,
+        "subplots.tight": True,
+        "subplots.refwidth": 6.5,
+        "subplots.panelpad": 1.5,
+    }
+)
+
 
 def plot_candy(
     hf: str | Path,
