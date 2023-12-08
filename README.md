@@ -45,7 +45,7 @@ Thus, we decided to develop [**`candies`**][candies], our feature extraction lib
 
 `candies` also plans to introduce additional features, such as:
 
-- [x] Zooming into the DM-$t$ plane.
+- [x] Zooming into the DM-$`t`$ plane.
 - [ ] Dealing with band-limited bursts.
 - [ ] Support for GMRT's shared memory based ring buffers.
 - [x] Dealing with both [**`PRESTO`**][presto]'s and [**AstroAccelerate**][aa]'s outputs.
