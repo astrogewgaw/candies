@@ -34,8 +34,8 @@ def plot_candy(
         fh = f.attrs["fh"]
         dmlow = f.attrs["dmlow"]
         dmhigh = f.attrs["dmhigh"]
-        dyn = np.asarray(f["dyn"])
-        dmt = np.asarray(f["dmt"])
+        dmt = np.asarray(f["data_dm_time"])
+        dyn = np.asarray(f["data_freq_time"])
 
         ntmid = int(nt / 2)  # type: ignore
         nti = ntmid - 128
