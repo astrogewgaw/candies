@@ -55,8 +55,8 @@ def read_csv(f: str | Path) -> list[dict[str, int | float]]:
             {
                 "t0": float(row[2]),
                 "dm": float(row[4]),
+                "wbin": int(row[3]),
                 "snr": float(row[1]),
-                "wbin": 2 ** int(row[3]),
             }
             for row in list(csv.reader(fp))[1:]
         ]
