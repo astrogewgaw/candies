@@ -4,10 +4,8 @@ Code for the Candies CLI.
 
 import typer
 from pathlib import Path
+from candies.core import Candies
 from typing_extensions import Annotated
-from candies.plotting import plot_candies
-from candies.processing import process_candies
-
 
 # The Typer App.
 app = typer.Typer(
@@ -82,14 +80,7 @@ def make(
     """
     Make features for all candy-dates.
     """
-    process_candies(
-        candidates,
-        filterbank,
-        ndms,
-        device,
-        save,
-        zoom,
-    )
+    Candies.wrap(candidates, filterbank).process(ndms, device, save, zoom)
 
 
 @app.command()
@@ -121,4 +112,4 @@ def plot(
     """
     Plot candy-date(s).
     """
-    plot_candies(list(candidates), save, show)
+    Candies.load(list(candidates)).plot(save, show)
