@@ -3,6 +3,7 @@ Code for the Candies CLI.
 """
 
 import typer
+import random
 from pathlib import Path
 from candies.core import Candies
 from typing_extensions import Annotated
@@ -112,4 +113,5 @@ def plot(
     """
     Plot candy-date(s).
     """
+    random.shuffle(candidates)
     Candies.load(list(candidates)).plot(save, show)
