@@ -57,6 +57,7 @@ class Candy:
     bw: float
     fh: float
     fl: float
+    mjd: float
     tobs: float
 
     # Hidden internal parameters.
@@ -83,6 +84,7 @@ class Candy:
         t0: float,
         dm: float,
         snr: float,
+        mjd: float,
         tobs: float,
         wbin: int | float,
         skip: int | None = None,
@@ -103,6 +105,7 @@ class Candy:
             dm=dm,
             mm=mm,
             snr=snr,
+            mjd=mjd,
             tobs=tobs,
             skip=skip,
             wbin=int(wbin),
@@ -154,7 +157,7 @@ class Candy:
         """
         The candy-date's ID.
         """
-        return f"T{self.t0:.7f}DM{self.dm:.5f}SNR{self.snr:.5f}"
+        return f"MJD{self.mjd:.7f}_T{self.t0:.7f}_DM{self.dm:.5f}_SNR{self.snr:.5f}"
 
     def chop(self) -> np.ndarray:
         """
@@ -318,7 +321,7 @@ class Candy:
             if self.dyn is not None:
                 ftset = f.create_dataset(
                     "data_freq_time",
-                    data=self.dyn,
+                    data=self.dyn.T,
                     compression="gzip",
                     compression_opts=9,
                 )
@@ -447,6 +450,7 @@ class Candies(MutableSequence):
         dt = m["tsamp"]
         nf = m["nchans"]
         skip = m["size"]
+        mjd = m["tstart"]
         df = np.abs(m["foff"])
 
         nt = int(mm.size() - skip)
@@ -465,6 +469,7 @@ class Candies(MutableSequence):
                     fh=fh,
                     fl=fl,
                     mm=mm,
+                    mjd=mjd,
                     tobs=tobs,
                     skip=skip,
                     **value,
