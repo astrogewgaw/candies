@@ -390,7 +390,7 @@ class Candy:
             )
 
             if save:
-                fig.savefig(f"{id}.png", dpi=300)
+                fig.savefig(f"{self.id}.png", dpi=300)
             if show:
                 pplt.show()
         else:
