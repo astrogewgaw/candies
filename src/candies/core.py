@@ -14,16 +14,10 @@ from pathlib import Path
 from priwo import readhdr
 from rich.progress import track
 from typing_extensions import Self
-from candies.utilities import dmt_extent
 from collections.abc import MutableSequence
 from candies.kernels import fastdmt, dedisperse
-
-from candies.utilities import (
-    read_csv,
-    read_presto,
-    dispersive_delay,
-    read_astroaccelerate,
-)
+from candies.utilities import dmt_extent, dispersive_delay
+from candies.utilities import read_csv, read_presto, read_astroaccelerate
 
 
 warnings.filterwarnings("ignore")
@@ -125,6 +119,7 @@ class Candy:
             nt = f.attrs["nt"]
             dt = f.attrs["dt"]
             dm = f.attrs["dm"]
+            mjd = f.attrs["mjd"]
             snr = f.attrs["snr"]
             wbin = f.attrs["wbin"]
             ndms = f.attrs["ndms"]
@@ -143,6 +138,7 @@ class Candy:
             dm=dm,
             snr=snr,
             dmt=dmt,
+            mjd=mjd,
             dyn=dyn,
             wbin=wbin,
             ndms=ndms,
@@ -229,7 +225,7 @@ class Candy:
         self.dmhigh = dmhigh
         ddm = (dmhigh - dmlow) / (ndms - 1)
 
-        tfactor = 1 if np.log2(self.wbin) < 3 else np.log2(self.wbin) // 2
+        tfactor = 1 if self.wbin < 3 else self.wbin // 2
         ffactor = np.floor(self.nf // 256).astype(int)
         nfdown = int(self.nf / ffactor)
         ntdown = int(self.nt / tfactor)
@@ -312,6 +308,7 @@ class Candy:
             f.attrs["df"] = self.df
             f.attrs["fl"] = self.fl
             f.attrs["fh"] = self.fh
+            f.attrs["mjd"] = self.mjd
 
             f.attrs["t0"] = self.t0
             f.attrs["dm"] = self.dm
