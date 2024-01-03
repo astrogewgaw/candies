@@ -126,7 +126,7 @@ class Candy:
             dmlow = f.attrs["dmlow"]
             dmhigh = f.attrs["dmhigh"]
             dmt = np.asarray(f["data_dm_time"])
-            dyn = np.asarray(f["data_freq_time"])
+            dyn = np.asarray(f["data_freq_time"]).T
         return cls(
             fl=fl,
             fh=fh,
