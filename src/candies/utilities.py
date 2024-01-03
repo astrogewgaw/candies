@@ -9,6 +9,16 @@ from pathlib import Path
 kdm: float = 4.1488064239e3
 
 
+def normalise(data):
+    """
+    Normalise data via median subtraction.
+    """
+    data = np.array(data, dtype=np.float32)
+    data -= np.median(data)
+    data /= np.std(data)
+    return data
+
+
 def dispersive_delay(
     f: float,
     f0: float,

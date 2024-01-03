@@ -16,7 +16,7 @@ from rich.progress import track
 from typing_extensions import Self
 from collections.abc import MutableSequence
 from candies.kernels import fastdmt, dedisperse
-from candies.utilities import dmt_extent, dispersive_delay
+from candies.utilities import dmt_extent, normalise, dispersive_delay
 from candies.utilities import read_csv, read_presto, read_astroaccelerate
 
 
@@ -277,8 +277,8 @@ class Candy:
         dmt = dmt[:, nticrop:ntfcrop]
         dyn = dyn[:, nticrop:ntfcrop]
 
-        self.dyn = dyn
-        self.dmt = dmt
+        self.dyn = normalise(dyn)
+        self.dmt = normalise(dmt)
 
         if save:
             self.save()
