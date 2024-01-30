@@ -3,7 +3,6 @@ Code for the Candies CLI.
 """
 
 import typer
-import random
 from pathlib import Path
 from candies.core import Candies
 from typing_extensions import Annotated
@@ -77,11 +76,18 @@ def make(
             help="If specified, employ the DMT zoom feature",
         ),
     ] = True,
+    fudge: Annotated[
+        float,
+        typer.Option(
+            help="A fudge factor for zooming into the DMT plane.",
+            rich_help_panel="Configure",
+        ),
+    ] = 16,
 ):
     """
     Make features for all candy-dates.
     """
-    Candies.wrap(candidates, filterbank).process(ndms, device, save, zoom)
+    Candies.wrap(candidates, filterbank).process(ndms, device, save, zoom, fudge)
 
 
 @app.command()
@@ -113,5 +119,4 @@ def plot(
     """
     Plot candy-date(s).
     """
-    random.shuffle(candidates)
     Candies.load(list(candidates)).plot(save, show)

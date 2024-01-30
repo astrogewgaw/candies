@@ -25,17 +25,17 @@ def dedisperse(
     """
     fi, ti = cuda.grid(2)  # type: ignore
 
+    acc = 0.0
     if fi < nf and ti < nt:
         k1 = kdm * dm / dt
         k2 = k1 * fh**-2
         f = fh - fi * df
         dbin = int(round(k1 * f**-2 - k2))
-        if dbin >= nt:
-            dbin = 0
         xti = ti + dbin
         if xti >= nt:
             xti -= nt
-        cuda.atomic.add(dyn, (int(fi / ffactor), int(ti / tfactor)), ft[fi, xti])  # type: ignore
+        acc += ft[fi, xti]
+        cuda.atomic.add(dyn, (int(fi / ffactor), int(ti / tfactor)), acc)  # type: ignore
 
 
 @cuda.jit
@@ -63,10 +63,8 @@ def fastdmt(
     for fi in range(nf):
         f = fh - fi * df
         dbin = int(round(k1 * f**-2 - k2))
-        if dbin >= nt:
-            dbin = 0
         xti = ti + dbin
         if xti >= nt:
             xti -= nt
         acc += ft[fi, xti]
-    dmt[dmi, int(ti / tfactor)] = acc
+    cuda.atomic.add(dmt, (dmi, int(ti / tfactor)), acc)  # type: ignore

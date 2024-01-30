@@ -3,6 +3,7 @@ Generally applicable code for Candies.
 """
 
 import mmap
+import random
 import warnings
 import h5py as h5
 import numpy as np
@@ -58,12 +59,15 @@ class Candy:
     skip: int | None = None
     mm: mmap.mmap | None = None
 
-    # Optional parameters.
+    # Optional post-processing parameters.
     ndms: int | None = None
     dmlow: float | None = None
     dmhigh: float | None = None
+
+    # Processing and post-processed data.
     dyn: np.ndarray | None = None
     dmt: np.ndarray | None = None
+    data: np.ndarray | None = None
 
     @classmethod
     def wrap(
@@ -155,7 +159,7 @@ class Candy:
         """
         return f"MJD{self.mjd:.7f}_T{self.t0:.7f}_DM{self.dm:.5f}_SNR{self.snr:.5f}"
 
-    def chop(self) -> np.ndarray:
+    def chop(self) -> None:
         """
         Chop out a time slice for a particular candy-date.
 
@@ -169,7 +173,7 @@ class Candy:
             maxdd = dispersive_delay(self.fl, self.fh, self.dm)
             ti = self.t0 - maxdd - (self.wbin * self.dt)
             tf = self.t0 + maxdd + (self.wbin * self.dt)
-            return np.pad(
+            self.data = np.pad(
                 np.frombuffer(
                     self.mm,
                     dtype=np.uint8,
@@ -195,6 +199,7 @@ class Candy:
         ndms: int = 256,
         save: bool = True,
         zoom: bool = True,
+        fudge: float = 16,
         stream: Any | None = None,
     ):
         """
@@ -205,8 +210,10 @@ class Candy:
             stream = cuda.stream()
             cuda_params = {"stream": stream}
 
-        data = self.chop()
-        _, self.nt = data.shape
+        self.chop()
+        if self.data is None:
+            raise CandiesError("Data could not be read from file.")
+        _, self.nt = self.data.shape
 
         if zoom:
             _, _, dmlow, dmhigh = dmt_extent(
@@ -216,6 +223,7 @@ class Candy:
                 self.t0,
                 self.dm,
                 self.wbin,
+                fudge=fudge,
             )
         else:
             dmlow, dmhigh = 0.0, 2.0 * self.dm
@@ -223,16 +231,16 @@ class Candy:
         self.ndms = ndms
         self.dmlow = dmlow
         self.dmhigh = dmhigh
-        ddm = (dmhigh - dmlow) / (ndms - 1)
+        ddm = (dmhigh - dmlow) / (self.ndms - 1)
 
         tfactor = 1 if self.wbin < 3 else self.wbin // 2
         ffactor = np.floor(self.nf // 256).astype(int)
         nfdown = int(self.nf / ffactor)
         ntdown = int(self.nt / tfactor)
 
-        ft = cuda.to_device(data, **cuda_params)
-        dmtx = cuda.device_array((ndms, ntdown), order="C", **cuda_params)
-        dynx = cuda.to_device(np.zeros((nfdown, ntdown), order="C"), **cuda_params)
+        datax = cuda.to_device(self.data, **cuda_params)
+        dynx = cuda.device_array((nfdown, ntdown), order="C", **cuda_params)
+        dmtx = cuda.device_array((self.ndms, ntdown), order="C", **cuda_params)
 
         dedisperse[  # type: ignore
             (self.nf // 32, self.nt // 32),
@@ -240,7 +248,7 @@ class Candy:
             stream,
         ](
             dynx,
-            ft,
+            datax,
             self.nf,
             self.nt,
             self.df,
@@ -257,7 +265,7 @@ class Candy:
             stream,
         ](
             dmtx,
-            ft,
+            datax,
             self.nf,
             self.nt,
             self.df,
@@ -316,14 +324,14 @@ class Candy:
             f.attrs["wbin"] = self.wbin
 
             if self.dyn is not None:
-                ftset = f.create_dataset(
+                dynset = f.create_dataset(
                     "data_freq_time",
                     data=self.dyn.T,
                     compression="gzip",
                     compression_opts=9,
                 )
-                ftset.dims[0].label = b"time"
-                ftset.dims[1].label = b"frequency"
+                dynset.dims[0].label = b"time"
+                dynset.dims[1].label = b"frequency"
 
             if self.dmt is not None:
                 dmtset = f.create_dataset(
@@ -358,9 +366,9 @@ class Candy:
             nti = ntmid - 128
             ntf = ntmid + 128
             ts = self.dyn.sum(axis=0)
+            t = np.linspace(nti * self.dt, ntf * self.dt, 256)  # type: ignore
             f = np.linspace(self.fh, self.fl, self.dyn.shape[0])  # type: ignore
             dms = np.linspace(self.dmhigh, self.dmlow, self.ndms)  # type: ignore
-            t = np.linspace(nti * self.dt, ntf * self.dt, self.dyn.shape[1])  # type: ignore
 
             fig, axs = pplt.subplots(
                 nrows=2,
@@ -370,13 +378,13 @@ class Candy:
                 sharey=False,
                 sharex="labels",
             )
+
             px = axs[0].panel_axes("t", width="5em")
-
             px.plot(t, ts)
-            axs[0].pcolormesh(*np.meshgrid(t, f), self.dyn)
-            axs[1].pcolormesh(*np.meshgrid(t, dms), self.dmt)
-
             px.format(xlabel="Time (in s)", ylabel="Flux (arb. units)")
+
+            axs[0].pcolormesh(*np.meshgrid(t, f), self.dyn, cmap="batlow")
+            axs[1].pcolormesh(*np.meshgrid(t, dms), self.dmt, cmap="batlow")
             axs[0].format(
                 xlabel="Time (in s)",
                 ylabel="Frequency (in MHz)",
@@ -394,7 +402,7 @@ class Candy:
             if show:
                 pplt.show()
         else:
-            raise CandiesError("Candy-date has nto yet been processed.")
+            raise CandiesError("Candy-date has not yet been processed.")
 
 
 @define
@@ -488,17 +496,20 @@ class Candies(MutableSequence):
         device: int = 0,
         save: bool = True,
         zoom: bool = True,
+        fudge: float = 16,
     ):
         """
         Process candy-dates.
         """
         cuda.select_device(device)
         stream = cuda.stream()
+        random.shuffle(self.items)
         for item in track(self.items, description="Processing candy-dates..."):
             item.process(
                 ndms,
                 save,
                 zoom,
+                fudge,
                 stream,
             )
         cuda.close()
