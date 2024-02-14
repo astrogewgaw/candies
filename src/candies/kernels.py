@@ -2,7 +2,6 @@
 GPU kernels for Candies.
 """
 
-
 from numba import cuda
 from candies.utilities import kdm
 
