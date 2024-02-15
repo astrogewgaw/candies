@@ -1,5 +1,5 @@
-import os
 import csv
+import mmap
 import random
 import h5py as h5
 import numpy as np
@@ -29,19 +29,12 @@ class Filterbank:
     fh: float
     fl: float
     mjd: float
-    ntcut: int
     tobs: float
-    tcut: float
-    data: np.ndarray
+    hdrsize: int
+    mapped: mmap.mmap
 
     @classmethod
-    def from_sigproc(
-        cls,
-        dm: float,
-        width: float,
-        tarrival: float,
-        fname: str | Path,
-    ) -> Self:
+    def load(cls, fname: str | Path) -> Self:
         meta = readhdr(fname)
 
         fh = meta["fch1"]
@@ -55,76 +48,72 @@ class Filterbank:
         bw = nf * df
         fl = fh - bw + 0.5 * df
 
-        with open(fname, "rb") as fptr:
-            fptr.seek(0, os.SEEK_END)
-            size = fptr.tell() - nskip
-            nt = int(size / nf)
-            tobs = nt * dt
-            fptr.seek(0)
+        fptr = open(fname, "rb")
+        mapped = mmap.mmap(fptr.fileno(), 0, mmap.MAP_PRIVATE, mmap.PROT_READ)
+        nbytes = int(mapped.size - nskip)
+        nt = nbytes // nf
+        tobs = nt * dt
 
-            maxdelay = dm2delay(fl, fh, dm)
-            ntbeg = int((tarrival - width - maxdelay) / dt)
-            ntend = int((tarrival + width + maxdelay) / dt)
-            ntcut = ntend - (0 if ntbeg < 0 else 0)
-            ntoff = 0 if ntbeg < 0 else ntbeg
-            noff = ntoff * nf + nskip
-            nchunk = ntcut * nf
-            tcut = nchunk * dt
-
-            chunked = np.ascontiguousarray(
-                np.pad(
-                    np.fromfile(
-                        fptr,
-                        offset=noff,
-                        count=nchunk,
-                        dtype=np.uint8,
-                    )
-                    .reshape(-1, nf)
-                    .T,
-                    (
-                        (0, 0),
-                        (
-                            -ntbeg if ntbeg < 0 else 0,
-                            ntend - nt if ntend > nt else 0,
-                        ),
-                    ),
-                    mode="median",
-                )
-            )
         return cls(
-            nf,
-            nt,
-            df,
-            dt,
-            bw,
-            fh,
-            fl,
-            mjd,
-            tobs,
-            tcut,
-            ntcut,
-            chunked,
+            nf=nf,
+            nt=nt,
+            df=df,
+            dt=dt,
+            bw=bw,
+            fh=fh,
+            fl=fl,
+            mjd=mjd,
+            tobs=tobs,
+            hdrsize=nskip,
+            mapped=mapped,
         )
 
-    def save(self, fname: str):
-        with h5.File(f"{fname}.h5", "a") as f:
-            f.attrs["nf"] = self.nf
-            f.attrs["dt"] = self.dt
-            f.attrs["df"] = self.df
-            f.attrs["fl"] = self.fl
-            f.attrs["fh"] = self.fh
-            f.attrs["mjd"] = self.mjd
-            f.attrs["tobs"] = self.tobs
-            f.attrs["tcut"] = self.tcut
-            f.attrs["ntcut"] = self.ntcut
-            dataset = f.create_dataset(
-                "dedispersed",
-                data=self.data,
-                compression="gzip",
-                compression_opts=9,
+    def chop(
+        self,
+        dm: float,
+        wbin: int,
+        tarrival: float,
+    ) -> np.ndarray:
+        maxdelay = dm2delay(self.fl, self.fh, dm)
+        ntbeg = int((tarrival - maxdelay) / self.dt) - wbin
+        ntend = int((tarrival + maxdelay) / self.dt) + wbin
+        return np.ascontiguousarray(
+            np.pad(
+                np.frombuffer(
+                    self.mapped,
+                    dtype=np.uint8,
+                    count=(ntend - (0 if ntbeg < 0 else ntbeg)) * self.nf,
+                    offset=(0 if ntbeg < 0 else ntbeg) * self.nf + self.hdrsize,
+                )
+                .reshape(-1, self.nf)
+                .T,
+                (
+                    (0, 0),
+                    (
+                        -ntbeg if ntbeg < 0 else 0,
+                        ntend - self.nt if ntend > self.nt else 0,
+                    ),
+                ),
+                mode="median",
             )
-            dataset.dims[1].label = b"time"
-            dataset.dims[0].label = b"frequency"
+        )
+
+
+@dataclass
+class Dedispersed:
+    nf: int
+    nt: int
+    df: float
+    dt: float
+    bw: float
+    fh: float
+    fl: float
+    mjd: float
+    tobs: float
+    data: np.ndarray | None
+
+    def save(self, fname: str):
+        pass
 
 
 @dataclass
@@ -153,65 +142,31 @@ class DMTransform:
 @dataclass
 class Candy:
     dm: float
+    wbin: int
     snr: float
-    width: float
     tarrival: float
     filterbank: Filterbank | None = None
-    dedispersed: Filterbank | None = None
+    dedispersed: Dedispersed | None = None
     dmtransform: DMTransform | None = None
 
     @classmethod
     def wrap(
         cls,
         dm: float,
+        wbin: int,
         snr: float,
-        width: float,
         tarrival: float,
     ) -> Self:
         return cls(
-            dm,
-            snr,
-            width,
-            tarrival,
+            dm=dm,
+            snr=snr,
+            wbin=wbin,
+            tarrival=tarrival,
         )
 
     @classmethod
-    def load(cls, fname: str | Path) -> Self:
-        with h5.File(fname, "r") as f:
-            meta = {
-                key: np.asarray(value)[0]
-                for (
-                    key,
-                    value,
-                ) in dict(f.attrs).items()
-            }
-            return cls(
-                dm=meta["dm"],
-                snr=meta["snr"],
-                width=meta["width"],
-                tarrival=meta["tarrival"],
-                dmtransform=DMTransform(
-                    nt=meta["nt"],
-                    ndms=meta["ndms"],
-                    dmlow=meta["dmlow"],
-                    dmhigh=meta["dmhigh"],
-                    data=np.asarray(f["dmtransform"]),
-                ),
-                dedispersed=Filterbank(
-                    nf=meta["nf"],
-                    fh=meta["fh"],
-                    fl=meta["fl"],
-                    df=meta["df"],
-                    nt=meta["nt"],
-                    dt=meta["dt"],
-                    bw=meta["bw"],
-                    mjd=meta["mjd"],
-                    tobs=meta["tobs"],
-                    tcut=meta["tcut"],
-                    ntcut=meta["ntcut"],
-                    data=np.asarray(f["dedispersed"]),
-                ),
-            )
+    def load(cls, fname: str | Path):
+        pass
 
     @property
     def id(self) -> str:
@@ -245,31 +200,25 @@ class Candy:
                 if gpudevice is not None:
                     cuda.select_device(gpudevice)
 
-                nf = self.filterbank.nf
-                nt = self.filterbank.nt
+                chunk = self.filterbank.chop(self.dm, self.wbin, self.tarrival)
+                fh = self.filterbank.fl
+                fl = self.filterbank.fh
                 df = self.filterbank.df
                 dt = self.filterbank.dt
-                fh = self.filterbank.fh
-                fl = self.filterbank.fl
-                mjd = self.filterbank.mjd
-                data = self.filterbank.data
-                tcut = self.filterbank.tcut
+                nf, nt = chunk.shape
+                tchunk = nt * dt
 
                 ffactor = np.floor(nf // 256).astype(int)
-                tfactor = 1 if self.width < 3 else self.width // 2
+                tfactor = 1 if self.wbin < 3 else self.wbin // 2
                 nfdown = int(nf / ffactor)
                 ntdown = int(nt / tfactor)
 
-                filongpu = cuda.to_device(data, **params)
+                filongpu = cuda.to_device(chunk, **params)
                 ddongpu = cuda.device_array((nfdown, ntdown), order="C", **params)
                 dmtongpu = cuda.device_array((ndms, ntdown), order="C", **params)
 
                 if zoom:
-                    dmext = zoomby * delay2dm(
-                        fl,
-                        fh,
-                        nt * dt,
-                    )
+                    dmext = zoomby * delay2dm(fl, fh, nt * dt)
                     dmlow = self.dm - dmext
                     dmhigh = self.dm + dmext
                 else:
@@ -318,19 +267,17 @@ class Candy:
                 dedispersed = ddongpu.copy_to_host(**params)
                 dedispersed = dedispersed[:, nti:ntf]
                 dedispersed = normalise(dedispersed)
-                self.dedispersed = Filterbank(
-                    nf=nfdown,
-                    nt=ntdown,
+                self.dedispersed = Dedispersed(
                     fh=fh,
                     fl=fl,
-                    mjd=mjd,
+                    nf=nfdown,
+                    nt=ntdown,
                     bw=fh - fl,
-                    tobs=tcut,
-                    tcut=tcut,
-                    ntcut=ntdown,
+                    tobs=tchunk,
                     data=dedispersed,
-                    dt=tcut / ntdown,
+                    dt=tchunk / ntdown,
                     df=(fh - fl) / nfdown,
+                    mjd=self.filterbank.mjd,
                 )
 
                 dmtransform = dmtongpu.copy_to_host(**params)
@@ -355,7 +302,7 @@ class Candy:
             f.attrs["id"] = self.id
             f.attrs["dm"] = self.dm
             f.attrs["snr"] = self.snr
-            f.attrs["width"] = self.width
+            f.attrs["wbin"] = self.wbin
             f.attrs["tarrival"] = self.tarrival
         if self.dedispersed is not None:
             self.dedispersed.save(self.id)
@@ -393,7 +340,7 @@ class Candies(MutableSequence):
                     Candy(
                         **{
                             "dm": float(row[4]),
-                            "width": int(row[3]),
+                            "wbin": int(row[3]),
                             "snr": float(row[1]),
                             "tarrival": float(row[2]),
                         }
