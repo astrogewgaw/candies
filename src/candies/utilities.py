@@ -15,4 +15,4 @@ def dm2delay(f: float, fref: float, dm: float) -> float:
 
 
 def delay2dm(f: float, fref: float, t: float) -> float:
-    return t / kdm * (f**-2 - fref**-2)
+    return t / (kdm * (f**-2 - fref**-2))
