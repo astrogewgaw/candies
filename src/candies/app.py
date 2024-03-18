@@ -127,7 +127,21 @@ def plot(
         disable=(not show_progress),
         description="Plotting...",
     ):
-        Candidate.load(candidate).plot(save, show)
+        candidate = Candidate.load(candidate)
+        mjd = candidate.extras["tstart"]  # type: ignore
+        candidate.plot(
+            save,
+            show,
+            saveto="_".join(
+                [
+                    f"MJD{mjd:.7f}",
+                    f"T{candidate.t0:.7f}",
+                    f"DM{candidate.dm:.5f}",
+                    f"SNR{candidate.snr:.5f}",
+                ]
+            )
+            + ".png",
+        )
 
 
 if __name__ == "__main__":
