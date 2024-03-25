@@ -1,17 +1,27 @@
 """
-Miscellaneous utilities for Candies.
+Utility functions for Candies.
 """
 
-import csv
 import numpy as np
-from pathlib import Path
 
+"""
+The value of the dispersion constant.
+"""
 kdm: float = 4.1488064239e3
 
 
-def normalise(data):
+def normalise(data: np.ndarray):
     """
-    Normalise data via median subtraction.
+    Normalise the data using a MAD-based prescription.
+
+    Parameters
+    ----------
+    data: np.ndarray
+        The data to normalise as a Numpy array.
+
+    Returns
+    -------
+    The normalised data as a Numpy array.
     """
     data = np.array(data, dtype=np.float32)
     data -= np.median(data)
@@ -19,84 +29,41 @@ def normalise(data):
     return data
 
 
-def dispersive_delay(
-    f: float,
-    f0: float,
-    dm: float,
-) -> float:
+def dm2delay(f: float, fref: float, dm: float) -> float:
     """
-    Calculates the dispersive delay (in s) for a particular frequency,
-    given a value of the dispersion measure (DM, in pc per cm^-3) and
-    the reference frequency. Both frequencies must be in MHz.
+    Calculate the delay corresponding to a particular DM.
+
+    Parameters
+    ----------
+    f: float
+        The frequency (in MHz) for which the delay needs to be calculated.
+    fref: float
+        The frequency (in MHz) w.r.t. which the delay will be calculated.
+    dm: float
+        The DM (in pc cm^-3) for which the delay will be calculated.
+
+    Returns
+    -------
+    The dispersive delay (in seconds) corresponding to the above values.
     """
-    return kdm * dm * (f**-2 - f0**-2)
+    return kdm * dm * (f**-2 - fref**-2)
 
 
-def dmt_extent(
-    fl: float,
-    fh: float,
-    dt: float,
-    t0: float,
-    dm: float,
-    wbin: float,
-    fudge: float = 16,
-):
+def delay2dm(f: float, fref: float, t: float) -> float:
     """
-    Calculate the extent of a dispersed burst in the DM v/s time plane until
-    a certain percentage drop in SNR. The SNR drop is determined via a fudge
-    factor = (ΔSNR)**-2; so, for instance, a 25% drop in SNR is equivalent to
-    a fudge factor of 16 (which is the default value).
-    """
-    width = wbin * dt
-    tbin = np.round(t0 / dt).astype(int)
-    ddm = (fudge * width) / (kdm * (fl**-2 - fh**-2))
-    dbin = np.round(kdm * ddm * (fl**-2 - fh**-2) / dt).astype(int)
-    t_range = (tbin - dbin, tbin + dbin)
-    dm_range = (dm - ddm, dm + ddm) if ddm < dm else (0.0, 2.0 * dm)
-    return (*t_range, *dm_range)
+    Calculate the DM corresponding to a particular delay.
 
+    Parameters
+    ----------
+    f: float
+        The frequency (in MHz) for which the delay was calculated.
+    fref: float
+        The frequency (in MHz) w.r.t. which the delay was calculated.
+    t: float
+        The dispersive delay (in seconds).
 
-def read_csv(f: str | Path) -> list[dict[str, int | float]]:
+    Returns
+    -------
+    The dispersion measure corresponding to the above values.
     """
-    Read in candy-dates from a CSV file.
-    """
-    with open(f, "r") as fp:
-        return [
-            {
-                "t0": float(row[2]),
-                "dm": float(row[4]),
-                "wbin": int(row[3]),
-                "snr": float(row[1]),
-            }
-            for row in list(csv.reader(fp))[1:]
-        ]
-
-
-def read_presto(f: str | Path) -> list[dict[str, int | float]]:
-    """
-    Read in candy-dates from a PRESTO *.singlepulse file.
-    """
-    return [
-        {
-            "t0": float(row[2]),
-            "dm": float(row[0]),
-            "snr": float(row[1]),
-            "wbin": int(row[3]),
-        }
-        for row in np.loadtxt(f, usecols=(0, 1, 2, 4))
-    ]
-
-
-def read_astroaccelerate(f: str | Path) -> list[dict[str, int | float]]:
-    """
-    Read in candy-dates from an AstroAccelerate *.dat file.
-    """
-    return [
-        {
-            "t0": float(row[1]),
-            "dm": float(row[0]),
-            "snr": float(row[2]),
-            "wbin": int(row[3]),
-        }
-        for row in np.fromfile(f, dtype=np.float32).reshape(-1, 4)
-    ]
+    return t / (kdm * (f**-2 - fref**-2))
