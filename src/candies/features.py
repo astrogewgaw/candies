@@ -25,8 +25,8 @@ def dedisperse(
     dt: float,
     fh: float,
     dm: float,
-    downfreq: int,
-    downtime: int,
+    downf: int,
+    downt: int,
 ):
     """
     The JIT-compiled CUDA kernel for dedispersing a dynamic spectrum.
@@ -49,9 +49,9 @@ def dedisperse(
         The highest frequency in the band.
     dm: float
         The DM at which to dedisperse (in pc cm^-3).
-    downfreq: int,
+    downf: int,
         The downsampling factor along the frequency axis.
-    downtime: int,
+    downt: int,
         The downsampling factor along the time axis.
     """
 
@@ -67,7 +67,7 @@ def dedisperse(
         if xti >= nt:
             xti -= nt
         acc += ft[fi, xti]
-        cuda.atomic.add(dyn, (int(fi / downfreq), int(ti / downtime)), acc)  # type: ignore
+        cuda.atomic.add(dyn, (int(fi / downf), int(ti / downt)), acc)  # type: ignore
 
 
 @cuda.jit
@@ -81,7 +81,7 @@ def fastdmt(
     fh: float,
     ddm: float,
     dmlow: float,
-    tfactor: int,
+    downt: int,
 ):
     """
     The JIT-compiled CUDA kernel for obtaining a DM transform.
@@ -106,7 +106,7 @@ def fastdmt(
         The DM step to use (in pc cm^-3)
     dmlow: float
         The lowest DM value (in pc cm^-3).
-    downtime: int,
+    downt: int,
         The downsampling factor along the time axis.
     """
 
@@ -123,7 +123,7 @@ def fastdmt(
         if xti >= nt:
             xti -= nt
         acc += ft[fi, xti]
-    cuda.atomic.add(dmt, (dmi, int(ti / tfactor)), acc)  # type: ignore
+    cuda.atomic.add(dmt, (dmi, int(ti / downt)), acc)  # type: ignore
 
 
 def featurize(
@@ -251,14 +251,13 @@ def featurize(
             ddm = (dmhigh - dmlow) / (ndms - 1)
             log.debug(f"Using DM range: {dmlow} to {dmhigh} pc cm^-3.")
 
-            downfreq = int(nf / 256)
-            downtime = 1 if candidate.wbin < 3 else int(candidate.wbin / 2)
-            log.debug(
-                f"Downsampling by {downfreq} in frequency and {downtime} in time."
-            )
+            downf = int(nf / 256)
+            downt = 1 if candidate.wbin < 3 else int(candidate.wbin / 2)
+            downt = downt if downt < int(nt / 256) else int(nt / 256)
+            log.debug(f"Downsampling by {downf} in frequency and {downt} in time.")
 
-            nfdown = int(nf / downfreq)
-            ntdown = int(nt / downtime)
+            nfdown = int(nf / downf)
+            ntdown = int(nt / downt)
 
             gpudata = cuda.to_device(data, stream=stream)
             gpudd = cuda.device_array((nfdown, ntdown), order="C", stream=stream)
@@ -277,8 +276,8 @@ def featurize(
                 dt,
                 fh,
                 candidate.dm,
-                downfreq,
-                downtime,
+                downf,
+                downt,
             )
 
             fastdmt[  # type: ignore
@@ -295,7 +294,7 @@ def featurize(
                 fh,
                 ddm,
                 dmlow,
-                downtime,
+                downt,
             )
 
             ntmid = int(ntdown / 2)
@@ -310,7 +309,7 @@ def featurize(
                 nf=256,
                 dm=candidate.dm,
                 data=dedispersed,
-                dt=dt * downtime,
+                dt=dt * downt,
                 df=(fh - fl) / 256,
             )
 
@@ -324,7 +323,7 @@ def featurize(
                 dmlow=dmlow,
                 dmhigh=dmhigh,
                 dm=candidate.dm,
-                dt=dt * downtime,
+                dt=dt * downt,
                 data=dmtransform,
             )
 
