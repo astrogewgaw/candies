@@ -242,12 +242,12 @@ def featurize(
             log.debug(f"Read in {nt} samples.")
 
             ndms = 256
+            dmlow, dmhigh = 0.0, 2 * candidate.dm
             if zoom:
                 log.debug("Zoom-in feature acitve. Calculating DM range.")
                 ddm = delay2dm(fl, fh, fudging * candidate.wbin * dt)
-                dmlow, dmhigh = candidate.dm - ddm, candidate.dm + ddm
-            else:
-                dmlow, dmhigh = 0.0, 2 * candidate.dm
+                if ddm < candidate.dm:
+                    dmlow, dmhigh = candidate.dm - ddm, candidate.dm + ddm
             ddm = (dmhigh - dmlow) / (ndms - 1)
             log.debug(f"Using DM range: {dmlow} to {dmhigh} pc cm^-3.")
 
