@@ -214,28 +214,79 @@ def featurize(
 
             binbeg = int((candidate.t0 - maxdelay) / dt) - candidate.wbin
             binend = int((candidate.t0 + maxdelay) / dt) + candidate.wbin
-            padbeg = -binbeg if binbeg < 0 else 0
-            padend = binend - totalbins if binend > totalbins else 0
-            binbeg = 0 if binbeg < 0 else binbeg
-            binend = totalbins if binend > totalbins else binend
+            noffset = binbeg + nskip
+            ncount = binend - binbeg
 
-            ncount = (binend - binbeg) * nf
-            noffset = (binbeg * nf) + nskip
+            nread = ncount
+            nbegin = noffset
+            if (candidate.wbin > 2) and (nread // (candidate.wbin // 2) < 256):
+                nread = 256 * candidate.wbin // 2
+                nbegin = noffset - (nread - ncount) // 2
+            elif nread < 256:
+                nread = 256
+                nbegin = noffset - (nread - ncount) // 2
+            else:
+                nbegin = noffset
 
-            data = np.ascontiguousarray(
-                np.pad(
-                    np.frombuffer(
+            if (nbegin >= 0) and (nbegin + nread) <= totalbins:
+                data = np.frombuffer(
+                    mapped,
+                    count=nread * nf,
+                    offset=nbegin * nf,
+                    dtype=np.uint8,
+                )
+            elif nbegin < 0:
+                if (nbegin + nread) <= totalbins:
+                    d = np.frombuffer(
                         mapped,
-                        count=ncount,
-                        offset=noffset,
+                        count=(nread + nbegin) * nf,
+                        offset=0,
                         dtype=np.uint8,
                     )
-                    .reshape(-1, nf)
-                    .T,
-                    ((0, 0), (padbeg, padend)),
-                    mode="median",
+                    dmedian = np.median(d, axis=0)
+                    data = (
+                        np.ones(
+                            (nread, nf),
+                            dtype=np.uint8,
+                        )
+                        * dmedian[None, :]
+                    )
+                    data[-nbegin:, :] = d
+                else:
+                    d = np.frombuffer(
+                        mapped,
+                        count=totalbins * nf,
+                        offset=0,
+                        dtype=np.uint8,
+                    )
+                    dmedian = np.median(d, axis=0)
+                    data = (
+                        np.ones(
+                            (nread, nf),
+                            dtype=np.uint8,
+                        )
+                        * dmedian[None, :]
+                    )
+                    data[-nbegin : -nbegin + totalbins, :] = d
+            else:
+                d = np.frombuffer(
+                    mapped,
+                    count=(totalbins - nbegin) * nf,
+                    offset=nbegin,
+                    dtype=np.uint8,
                 )
-            )
+                dmedian = np.median(d, axis=0)
+                data = (
+                    np.ones(
+                        (nread, nf),
+                        dtype=np.uint8,
+                    )
+                    * dmedian[None, :]
+                )
+                data[totalbins - nbegin, :] = d
+
+            data = data.T
+            data = np.ascontiguousarray(data)
 
             _, nt = data.shape
 
@@ -253,7 +304,6 @@ def featurize(
 
             downf = int(nf / 256)
             downt = 1 if candidate.wbin < 3 else int(candidate.wbin / 2)
-            downt = downt if downt < int(nt / 256) else int(nt / 256)
             log.debug(f"Downsampling by {downf} in frequency and {downt} in time.")
 
             nfdown = int(nf / downf)
