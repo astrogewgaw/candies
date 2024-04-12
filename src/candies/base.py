@@ -12,6 +12,14 @@ from dataclasses import dataclass
 from collections.abc import MutableSequence
 
 
+class CandiesError(Exception):
+    """
+    Represents any error in Candies.
+    """
+
+    pass
+
+
 @dataclass
 class Dedispersed:
     """

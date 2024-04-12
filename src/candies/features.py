@@ -2,15 +2,14 @@
 The feature extraction code for Candies.
 """
 
-import mmap
 import logging
 import h5py as h5
 import numpy as np
 from numba import cuda
 from pathlib import Path
-from priwo import readhdr
 from rich.progress import track
 from rich.logging import RichHandler
+from candies.interfaces import Filterbank
 from candies.base import Dedispersed, DMTransform, CandidateList
 from candies.utilities import kdm, delay2dm, dm2delay, normalise
 
@@ -183,130 +182,62 @@ def featurize(
     stream = cuda.stream()
     log.debug(f"Selected GPU {gpuid}.")
 
-    meta = readhdr(filterbank)
-    fh = meta["fch1"]
-    df = meta["foff"]
-    dt = meta["tsamp"]
-    nf = meta["nchans"]
-    mjd = meta["tstart"]
-    nskip = meta["size"]
-
-    if df < 0:
-        df = abs(df)
-        bw = nf * df
-        fl = fh - bw + (0.5 * df)
-    else:
-        fl = fh
-        bw = nf * df
-        fh = fl + bw - (0.5 * df)
-
-    with open(filterbank, "rb") as f:
-        mapped = mmap.mmap(f.fileno(), 0, mmap.MAP_PRIVATE, mmap.PROT_READ)
-        nbytes = int(mapped.size()) - nskip
-        totalbins = int(nbytes / nf)
-
+    with Filterbank(filterbank) as fil:
         for candidate in track(
             candidates,
             disable=(not progressbar),
             description="Featurizing...",
         ):
-            maxdelay = dm2delay(fl, fh, candidate.dm)
+            maxdelay = dm2delay(fil.fl, fil.fh, candidate.dm)
 
-            binbeg = int((candidate.t0 - maxdelay) / dt) - candidate.wbin
-            binend = int((candidate.t0 + maxdelay) / dt) + candidate.wbin
-            noffset = binbeg + nskip
-            ncount = binend - binbeg
+            binbeg = int((candidate.t0 - maxdelay) / fil.dt) - candidate.wbin
+            binend = int((candidate.t0 + maxdelay) / fil.dt) + candidate.wbin
 
-            nread = ncount
-            nbegin = noffset
+            nbegin = noffset = binbeg
+            nread = ncount = binend - binbeg
             if (candidate.wbin > 2) and (nread // (candidate.wbin // 2) < 256):
                 nread = 256 * candidate.wbin // 2
-                nbegin = noffset - (nread - ncount) // 2
             elif nread < 256:
                 nread = 256
-                nbegin = noffset - (nread - ncount) // 2
-            else:
-                nbegin = noffset
+            nbegin = noffset - (nread - ncount) // 2
 
-            if (nbegin >= 0) and (nbegin + nread) <= totalbins:
-                data = np.frombuffer(
-                    mapped,
-                    count=nread * nf,
-                    offset=nbegin * nf,
-                    dtype=np.uint8,
-                )
+            if (nbegin >= 0) and (nbegin + nread) <= fil.nt:
+                data = fil.get(offset=nbegin, count=nread)
             elif nbegin < 0:
-                if (nbegin + nread) <= totalbins:
-                    d = np.frombuffer(
-                        mapped,
-                        count=(nread + nbegin) * nf,
-                        offset=0,
-                        dtype=np.uint8,
-                    )
+                if (nbegin + nread) <= fil.nt:
+                    d = fil.get(offset=0, count=nread + nbegin)
                     dmedian = np.median(d, axis=0)
-                    data = (
-                        np.ones(
-                            (nread, nf),
-                            dtype=np.uint8,
-                        )
-                        * dmedian[None, :]
-                    )
-                    data[-nbegin:, :] = d
+                    data = np.ones((fil.nf, nread), dtype=fil.dtype) * dmedian[None, :]
+                    data[:, -nbegin:] = d
                 else:
-                    d = np.frombuffer(
-                        mapped,
-                        count=totalbins * nf,
-                        offset=0,
-                        dtype=np.uint8,
-                    )
+                    d = fil.get(offset=0, count=fil.nt)
                     dmedian = np.median(d, axis=0)
-                    data = (
-                        np.ones(
-                            (nread, nf),
-                            dtype=np.uint8,
-                        )
-                        * dmedian[None, :]
-                    )
-                    data[-nbegin : -nbegin + totalbins, :] = d
+                    data = np.ones((fil.nf, nread), dtype=fil.dtype) * dmedian[None, :]
+                    data[:, -nbegin : -nbegin + fil.nt] = d
             else:
-                d = np.frombuffer(
-                    mapped,
-                    count=(totalbins - nbegin) * nf,
-                    offset=nbegin,
-                    dtype=np.uint8,
-                )
+                d = fil.get(offset=nbegin, count=fil.nt - nbegin)
                 dmedian = np.median(d, axis=0)
-                data = (
-                    np.ones(
-                        (nread, nf),
-                        dtype=np.uint8,
-                    )
-                    * dmedian[None, :]
-                )
-                data[totalbins - nbegin, :] = d
+                data = np.ones((fil.nf, nread), dtype=fil.dtype) * dmedian[None, :]
+                data[:, fil.nt - nbegin] = d
 
-            data = data.T
-            data = np.ascontiguousarray(data)
-
-            _, nt = data.shape
-
-            log.debug(f"Read in {nt} samples.")
+            nf, nt = data.shape
+            log.debug(f"Read in {nf} channels and {nt} samples.")
 
             ndms = 256
             dmlow, dmhigh = 0.0, 2 * candidate.dm
             if zoom:
                 log.debug("Zoom-in feature acitve. Calculating DM range.")
-                ddm = delay2dm(fl, fh, fudging * candidate.wbin * dt)
+                ddm = delay2dm(fil.fl, fil.fh, fudging * candidate.wbin * fil.dt)
                 if ddm < candidate.dm:
                     dmlow, dmhigh = candidate.dm - ddm, candidate.dm + ddm
             ddm = (dmhigh - dmlow) / (ndms - 1)
             log.debug(f"Using DM range: {dmlow} to {dmhigh} pc cm^-3.")
 
-            downf = int(nf / 256)
+            downf = int(fil.nf / 256)
             downt = 1 if candidate.wbin < 3 else int(candidate.wbin / 2)
             log.debug(f"Downsampling by {downf} in frequency and {downt} in time.")
 
-            nfdown = int(nf / downf)
+            nfdown = int(fil.nf / downf)
             ntdown = int(nt / downt)
 
             gpudata = cuda.to_device(data, stream=stream)
@@ -314,17 +245,17 @@ def featurize(
             gpudmt = cuda.device_array((ndms, ntdown), order="C", stream=stream)
 
             dedisperse[  # type: ignore
-                (int(nf / 32), int(nt / 32)),
+                (int(fil.nf / 32), int(nt / 32)),
                 (32, 32),
                 stream,
             ](
                 gpudd,
                 gpudata,
-                nf,
+                fil.nf,
                 nt,
-                df,
-                dt,
-                fh,
+                fil.df,
+                fil.dt,
+                fil.fh,
                 candidate.dm,
                 downf,
                 downt,
@@ -339,9 +270,9 @@ def featurize(
                 gpudata,
                 nf,
                 nt,
-                df,
-                dt,
-                fh,
+                fil.df,
+                fil.dt,
+                fil.fh,
                 ddm,
                 dmlow,
                 downt,
@@ -353,14 +284,14 @@ def featurize(
             dedispersed = dedispersed[:, ntmid - 128 : ntmid + 128]
             dedispersed = normalise(dedispersed)
             candidate.dedispersed = Dedispersed(
-                fl=fl,
-                fh=fh,
+                fl=fil.fl,
+                fh=fil.fh,
                 nt=256,
                 nf=256,
                 dm=candidate.dm,
                 data=dedispersed,
-                dt=dt * downt,
-                df=(fh - fl) / 256,
+                dt=fil.dt * downt,
+                df=(fil.fh - fil.fl) / 256,
             )
 
             dmtransform = gpudmt.copy_to_host(stream=stream)
@@ -373,7 +304,7 @@ def featurize(
                 dmlow=dmlow,
                 dmhigh=dmhigh,
                 dm=candidate.dm,
-                dt=dt * downt,
+                dt=fil.dt * downt,
                 data=dmtransform,
             )
 
@@ -381,7 +312,7 @@ def featurize(
                 fname = (
                     "_".join(
                         [
-                            f"MJD{mjd:.7f}",
+                            f"MJD{fil.header['tstart']:.7f}",
                             f"T{candidate.t0:.7f}",
                             f"DM{candidate.dm:.5f}",
                             f"SNR{candidate.snr:.5f}",
@@ -392,6 +323,6 @@ def featurize(
                 candidate.save(fname)
                 with h5.File(fname, "a") as f:
                     group = f.create_group("extras")
-                    for key, value in meta.items():
+                    for key, value in fil.header.items():
                         group.attrs[key] = value
     cuda.close()
