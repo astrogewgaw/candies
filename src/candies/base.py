@@ -78,7 +78,7 @@ class Dedispersed:
                 fl=f.attrs["fl"],  # type: ignore
                 fh=f.attrs["fh"],  # type: ignore
                 dm=f.attrs["dm"],  # type: ignore
-                data=np.asarray(f["data_time_freq"]).T,
+                data=np.asarray(f["data_freq_time"]).T,
             )
 
     @property
@@ -168,7 +168,7 @@ class Dedispersed:
             f.attrs["fh"] = self.fh
             f.attrs["dm"] = self.dm
             dataset = f.create_dataset(
-                "data_time_freq",
+                "data_freq_time",
                 data=self.data.T,
                 compression="gzip",
                 compression_opts=9,
