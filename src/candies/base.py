@@ -2,9 +2,9 @@
 The base code for Candies.
 """
 
-import csv
 import h5py as h5
 import numpy as np
+import pandas as pd
 import proplot as pplt
 from typing import Self
 from pathlib import Path
@@ -137,10 +137,10 @@ class Dedispersed:
             ax.pcolormesh(self.times, self.freqs, self.data, cmap="batlow")  # type: ignore
             ax.invert_yaxis()  # type: ignore
 
-            if show:
-                pplt.show()
             if save:
                 fig.savefig(saveto)
+            if show:
+                pplt.show()
         else:
             px = ax.panel_axes("top", width="5em", space=0)
             px.plot(self.times, self.profile, lw=0.5, cycle="batlow")
@@ -285,10 +285,10 @@ class DMTransform:
             ax.pcolormesh(self.times, self.dms, self.data, cmap="batlow")  # type: ignore
             ax.invert_yaxis()  # type: ignore
 
-            if show:
-                pplt.show()
             if save:
                 fig.savefig(saveto)
+            if show:
+                pplt.show()
         else:
             ax.format(xlabel=r"$\Delta t$ (in ms)", ylabel=r"DM (in pc cm$^{-3}$)")
             ax.pcolormesh(self.times, self.dms, self.data, cmap="batlow")
@@ -471,7 +471,8 @@ class Candidate:
                 fields.insert(1, [f"{ra:s}"])
                 fields.insert(2, [f"{dec:s}"])
 
-                fig.format(suptitle=f"{self.extras['rawdatafile']}")  # type: ignore
+                title = self.extras.get("rawdatafile", "")
+                fig.format(suptitle=f"{title}")  # type: ignore
 
             axtab.axis("off")
             table = axtab.table(
@@ -483,10 +484,10 @@ class Candidate:
             )
             table.auto_set_font_size(False)
 
-            if show:
-                pplt.show()
             if save:
                 fig.savefig(saveto)
+            if show:
+                pplt.show()
 
     def save(self, fname: str | Path) -> None:
         """
@@ -556,17 +557,47 @@ class CandidateList(MutableSequence):
         fname:str | Path
             Path to the CSV file.
         """
-        with open(fname, "r") as f:
-            return cls(
-                candidates=[
-                    Candidate(
-                        **{
-                            "t0": float(row[2]),
-                            "dm": float(row[4]),
-                            "wbin": int(row[3]),
-                            "snr": float(row[1]),
+        df = pd.read_csv(fname)
+        return cls(
+            candidates=[
+                Candidate(
+                    **(
+                        {
+                            "dm": float(row["dm"]),
+                            "snr": float(row["snr"]),
+                            "wbin": int(row["width"]),
+                            "t0": float(row["stime"]),
+                            "fname": str(row["file"]),
                         }
                     )
-                    for row in list(csv.reader(f))[1:]
-                ]
-            )
+                )
+                for _, row in df.iterrows()
+            ]
+        )
+
+    def tocsv(self, fname: str | Path) -> None:
+        """
+        Save a list of candidates to a CSV file.
+
+        Parameters
+        ----------
+        fname:str | Path
+            Path to the CSV file.
+        """
+        pd.DataFrame(
+            [
+                (
+                    {
+                        "file": pd.NA,
+                        "snr": candidate.snr,
+                        "stime": candidate.t0,
+                        "width": candidate.wbin,
+                        "dm": candidate.dm,
+                        "label": 0,
+                        "chan_mask_path": pd.NA,
+                        "num_files": 1,
+                    }
+                )
+                for candidate in self.candidates
+            ]
+        ).to_csv(fname)

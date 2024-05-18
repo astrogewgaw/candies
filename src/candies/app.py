@@ -2,7 +2,6 @@
 The application code for Candies.
 """
 
-import csv
 import random
 import cyclopts
 from pathlib import Path
@@ -34,6 +33,10 @@ def make(
 
     Parameters
     ----------
+    candlist: str
+        List of candidates as a CSV file.
+    fil: str | Path
+        The name of the filterbank file to process.
     gpuid: int
         Specify the GPU to use by its ID.
     save: bool
@@ -62,27 +65,28 @@ def make(
 
 
 @app.command
-def _list(
-    candidates: list[str | Path],
+def list_(
+    candfiles: list[str | Path],
     show: bool = False,
     save: bool = True,
     saveto: str = "candidates.csv",
 ):
     """
     List all candy-date(s).
+
+    Parameters
+    ----------
+    candfiles: list[str | Path]
+        List of candy-date files.
+    show: bool
+        Show list of candidates as a table.
+    save: bool
+        Save list of candidates to a CSV file.
+    saveto: str, optional
+        Name of the CSV file to save the candidates to.
     """
 
-    rows = []
-    for candidate in candidates:
-        candidate = Candidate.load(candidate)
-        rows.append(
-            [
-                f"{candidate.dm:.2f}",
-                f"{candidate.t0:.2f}",
-                f"{candidate.snr:.2f}",
-                f"{candidate.wbin:d}",
-            ]
-        )
+    candidates = CandidateList([Candidate.load(candfile) for candfile in candfiles])
 
     if show:
         console = Console()
@@ -91,19 +95,23 @@ def _list(
         table.add_column("Arrival time (in s)")
         table.add_column("SNR")
         table.add_column("Width (in bins)")
-        for row in rows:
-            table.add_row(*row)
+        for candidate in candidates:
+            table.add_row(
+                *[
+                    f"{candidate.dm:.2f}",
+                    f"{candidate.t0:.2f}",
+                    f"{candidate.snr:.2f}",
+                    f"{candidate.wbin:d}",
+                ]
+            )
         console.print(table)
     if save:
-        with open(saveto, "w") as csvfile:
-            csvwriter = csv.writer(csvfile)
-            csvwriter.writerow(["dm", "tarrival", "snr", "wbin"])
-            csvwriter.writerows(rows)
+        candidates.tocsv(saveto)
 
 
 @app.command
 def plot(
-    candidates: list[str | Path],
+    candfiles: list[str | Path],
     show: bool = False,
     save: bool = True,
     show_progress: bool = True,
@@ -113,30 +121,34 @@ def plot(
 
     Parameters
     ----------
-    candidates: list[str | Path]
+    candfiles: list[str | Path]
         List of candy-date files.
     show: bool
         Show plot.
     save: bool
         Save plot to disk.
     show_progress: bool, optional
-        Show the progress bar. True by default.
+        Show the progress bar.
     """
-    for candidate in track(
-        candidates,
+    for candfile in track(
+        candfiles,
         disable=(not show_progress),
         description="Plotting...",
     ):
-        candidate = Candidate.load(candidate)
-        mjd = candidate.extras["tstart"]  # type: ignore
+        candidate = Candidate.load(candfile)
+        mjd = (
+            candidate.extras.get("tstart", None)
+            if candidate.extras is not None
+            else None
+        )
         candidate.plot(
             save,
             show,
-            saveto="_".join(
+            saveto="".join(
                 [
-                    f"MJD{mjd:.7f}",
-                    f"T{candidate.t0:.7f}",
-                    f"DM{candidate.dm:.5f}",
+                    f"MJD{mjd:.7f}_" if mjd is not None else "",
+                    f"T{candidate.t0:.7f}_",
+                    f"DM{candidate.dm:.5f}_",
                     f"SNR{candidate.snr:.5f}",
                 ]
             )

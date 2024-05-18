@@ -309,12 +309,13 @@ def featurize(
             )
 
             if save:
+                mjd = fil.header.get("tstart", None)
                 fname = (
-                    "_".join(
+                    "".join(
                         [
-                            f"MJD{fil.header['tstart']:.7f}",
-                            f"T{candidate.t0:.7f}",
-                            f"DM{candidate.dm:.5f}",
+                            f"MJD{mjd:.7f}_" if mjd is not None else "",
+                            f"T{candidate.t0:.7f}_",
+                            f"DM{candidate.dm:.5f}_",
                             f"SNR{candidate.snr:.5f}",
                         ]
                     )
