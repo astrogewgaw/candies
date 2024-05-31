@@ -353,6 +353,7 @@ class Candidate:
     t0: float
     wbin: int
     snr: float
+    fname: str | None = None
     extras: dict | None = None
     dedispersed: Dedispersed | None = None
     dmtransform: DMTransform | None = None
