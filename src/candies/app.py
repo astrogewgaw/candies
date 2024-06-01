@@ -5,11 +5,12 @@ The application code for Candies.
 import random
 import cyclopts
 from pathlib import Path
+from typing import Optional
 from rich.table import Table
 from rich.progress import track
 from rich.console import Console
 from candies.features import featurize
-from candies.base import Candidate, CandidateList
+from candies.base import CandiesError, Candidate, CandidateList
 
 app = cyclopts.App()
 app["--help"].group = "Admin"
@@ -20,7 +21,7 @@ app["--version"].group = "Admin"
 def make(
     candlist: str,
     /,
-    fil: str | Path,
+    fil: str | Path | None = None,
     gpuid: int = 0,
     save: bool = True,
     zoom: bool = True,
@@ -35,15 +36,15 @@ def make(
     ----------
     candlist: str
         List of candidates as a CSV file.
-    fil: str | Path
+    fil: str | Path, optional
         The name of the filterbank file to process.
-    gpuid: int
+    gpuid: int, optional
         Specify the GPU to use by its ID.
-    save: bool
+    save: bool, optional
         Save the candidates to disk after feature creation.
-    zoom: bool
+    zoom: bool, optional
         Zoom in to the DMT using a simple, automatic method.
-    fudging: int
+    fudging: int, optional
         The factor to zoom in by.
     verbose: bool, optional
         Activate verbose printing. False by default.
@@ -52,6 +53,12 @@ def make(
     """
     candidates = CandidateList.fromcsv(candlist)
     random.shuffle(candidates)
+
+    if fil is None:
+        fil, = set([_.fname for _ in candidates])
+        if fil is None:
+            raise CandiesError("No filterbank file given to process!")
+
     featurize(
         candidates=candidates,
         filterbank=fil,
@@ -78,9 +85,9 @@ def list_(
     ----------
     candfiles: list[str | Path]
         List of candy-date files.
-    show: bool
+    show: bool, optional
         Show list of candidates as a table.
-    save: bool
+    save: bool, optional
         Save list of candidates to a CSV file.
     saveto: str, optional
         Name of the CSV file to save the candidates to.
@@ -123,9 +130,9 @@ def plot(
     ----------
     candfiles: list[str | Path]
         List of candy-date files.
-    show: bool
+    show: bool, optional
         Show plot.
-    save: bool
+    save: bool, optional
         Save plot to disk.
     show_progress: bool, optional
         Show the progress bar.

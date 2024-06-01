@@ -152,7 +152,7 @@ def featurize(
     ----------
     candidates: CandidateList
         A list of candidates to process.
-    filterbank:
+    filterbank: str | Path
         The path of the filterbank file to process.
     gpuid: int, optional
         The ID of the GPU to be used. The default value is 0.
