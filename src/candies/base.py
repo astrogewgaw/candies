@@ -125,23 +125,8 @@ class Dedispersed:
         saveto: str or Path
             Path where to save the plot. Default is "dedispersed.png" in the current working directory.
         """
-        if ax is None:
-            fig = pplt.figure()
-            ax = fig.subplot()  # type: ignore
 
-            px = ax.panel_axes("top", width="5em", space=0)  # type: ignore
-            px.plot(self.times, self.profile, lw=0.5, cycle="batlow")
-            px.set_yticks([])
-
-            ax.format(xlabel=r"$\Delta t (in ms)$", ylabel="Frequency (in MHz)")  # type: ignore
-            ax.pcolormesh(self.times, self.freqs, self.data, cmap="batlow")  # type: ignore
-            ax.invert_yaxis()  # type: ignore
-
-            if save:
-                fig.savefig(saveto)
-            if show:
-                pplt.show()
-        else:
+        def _plot(ax: pplt.Axes) -> None:
             px = ax.panel_axes("top", width="5em", space=0)
             px.plot(self.times, self.profile, lw=0.5, cycle="batlow")
             px.set_yticks([])
@@ -149,6 +134,18 @@ class Dedispersed:
             ax.format(xlabel=r"$\Delta t$ (in ms)", ylabel="Frequency (in MHz)")
             ax.pcolormesh(self.times, self.freqs, self.data, cmap="batlow")
             ax.invert_yaxis()
+
+        if ax is None:
+            fig = pplt.figure()
+            ax = fig.subplot()  # type: ignore
+            _plot(ax)  # type: ignore
+            if save:
+                fig.savefig(saveto)
+            if show:
+                pplt.show()
+            pplt.close(fig)
+        else:
+            _plot(ax)
 
     def save(self, fname: str | Path) -> None:
         """
@@ -277,22 +274,23 @@ class DMTransform:
         saveto: str or Path
             Path where to save the plot. Default is "dmtransform.png" in the current working directory.
         """
+
+        def _plot(ax: pplt.Axes):
+            ax.format(xlabel=r"$\Delta t$ (in ms)", ylabel=r"DM (in pc cm$^{-3}$)")
+            ax.pcolormesh(self.times, self.dms, self.data, cmap="batlow")
+            ax.invert_yaxis()
+
         if ax is None:
             fig = pplt.figure()
             ax = fig.subplot()  # type: ignore
-
-            ax.format(xlabel=r"$\Delta t (in ms)$", ylabel=r"DM (in pc cm$^{-3}$)")  # type: ignore
-            ax.pcolormesh(self.times, self.dms, self.data, cmap="batlow")  # type: ignore
-            ax.invert_yaxis()  # type: ignore
-
+            _plot(ax)  # type: ignore
             if save:
                 fig.savefig(saveto)
             if show:
                 pplt.show()
+            pplt.close(fig)
         else:
-            ax.format(xlabel=r"$\Delta t$ (in ms)", ylabel=r"DM (in pc cm$^{-3}$)")
-            ax.pcolormesh(self.times, self.dms, self.data, cmap="batlow")
-            ax.invert_yaxis()
+            _plot(ax)
 
     def save(self, fname: str | Path) -> None:
         """
@@ -387,7 +385,7 @@ class Candidate:
         saveto: str = "candidate.png",
     ):
         """
-        Plot a dedispersed dynamic spectrum.
+        Plot a candidate.
 
         Parameters
         ----------
@@ -489,6 +487,7 @@ class Candidate:
                 fig.savefig(saveto)
             if show:
                 pplt.show()
+            pplt.close(fig)
 
     def save(self, fname: str | Path) -> None:
         """
