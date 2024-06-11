@@ -590,7 +590,7 @@ class CandidateList(MutableSequence):
             [
                 (
                     {
-                        "file": pd.NA,
+                        "file": candidate.fname,
                         "snr": candidate.snr,
                         "stime": candidate.t0,
                         "width": candidate.wbin,
