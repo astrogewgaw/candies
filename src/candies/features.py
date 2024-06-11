@@ -210,18 +210,18 @@ def featurize(
             elif nbegin < 0:
                 if (nbegin + nread) <= fil.nt:
                     d = fil.get(offset=0, count=nread + nbegin)
-                    dmedian = np.median(d, axis=0)
-                    data = np.ones((fil.nf, nread), dtype=fil.dtype) * dmedian[None, :]
+                    dmedian = np.median(d, axis=1)
+                    data = np.ones((fil.nf, nread), dtype=fil.dtype) * dmedian[:, None]
                     data[:, -nbegin:] = d
                 else:
                     d = fil.get(offset=0, count=fil.nt)
-                    dmedian = np.median(d, axis=0)
-                    data = np.ones((fil.nf, nread), dtype=fil.dtype) * dmedian[None, :]
+                    dmedian = np.median(d, axis=1)
+                    data = np.ones((fil.nf, nread), dtype=fil.dtype) * dmedian[:, None]
                     data[:, -nbegin : -nbegin + fil.nt] = d
             else:
                 d = fil.get(offset=nbegin, count=fil.nt - nbegin)
-                dmedian = np.median(d, axis=0)
-                data = np.ones((fil.nf, nread), dtype=fil.dtype) * dmedian[None, :]
+                dmedian = np.median(d, axis=1)
+                data = np.ones((fil.nf, nread), dtype=fil.dtype) * dmedian[:, None]
                 data[:, fil.nt - nbegin] = d
 
             nf, nt = data.shape
