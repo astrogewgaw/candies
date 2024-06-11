@@ -2,14 +2,16 @@
 The base code for Candies.
 """
 
+from collections.abc import MutableSequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Self
+
 import h5py as h5
+import matplotlib
 import numpy as np
 import pandas as pd
 import proplot as pplt
-from typing import Self
-from pathlib import Path
-from dataclasses import dataclass
-from collections.abc import MutableSequence
 
 
 class CandiesError(Exception):
@@ -136,6 +138,8 @@ class Dedispersed:
             ax.invert_yaxis()
 
         if ax is None:
+            if not show:
+                matplotlib.use("agg")
             fig = pplt.figure()
             ax = fig.subplot()  # type: ignore
             _plot(ax)  # type: ignore
@@ -281,6 +285,8 @@ class DMTransform:
             ax.invert_yaxis()
 
         if ax is None:
+            if not show:
+                matplotlib.use("agg")
             fig = pplt.figure()
             ax = fig.subplot()  # type: ignore
             _plot(ax)  # type: ignore
@@ -397,6 +403,8 @@ class Candidate:
             Path where to save the plot. Default is "candidate.png" in the current working directory.
         """
         if (self.dedispersed is not None) and (self.dmtransform is not None):
+            if not show:
+                matplotlib.use("agg")
             fig = pplt.figure(width=7.5, height=5, sharey=False)
             gs = pplt.GridSpec(nrows=2, ncols=3)
             axtab = fig.subplot(gs[:, -1])  # type: ignore
@@ -548,16 +556,15 @@ class CandidateList(MutableSequence):
         self.candidates.insert(index, value)
 
     @classmethod
-    def fromcsv(cls, fname: str | Path) -> Self:
+    def from_df(cls, df: pd.DataFrame) -> Self:
         """
-        Get a list of candidates from a CSV file.
+        Get a list of candidates from `pandas` DataFrame.
 
         Parameters
         ----------
-        fname:str | Path
-            Path to the CSV file.
+        df: pandas.DataFrame
+            The DataFrame which contains the list of candidates.
         """
-        df = pd.read_csv(fname)
         return cls(
             candidates=[
                 Candidate(
@@ -575,16 +582,11 @@ class CandidateList(MutableSequence):
             ]
         )
 
-    def tocsv(self, fname: str | Path) -> None:
+    def to_df(self) -> pd.DataFrame:
         """
-        Save a list of candidates to a CSV file.
-
-        Parameters
-        ----------
-        fname:str | Path
-            Path to the CSV file.
+        Convert a list of candidates to a `pandas` DataFrame.
         """
-        pd.DataFrame(
+        return pd.DataFrame(
             [
                 (
                     {
@@ -600,4 +602,27 @@ class CandidateList(MutableSequence):
                 )
                 for candidate in self.candidates
             ]
-        ).to_csv(fname)
+        )
+
+    @classmethod
+    def from_csv(cls, fname: str | Path) -> Self:
+        """
+        Get a list of candidates from a CSV file.
+
+        Parameters
+        ----------
+        fname: str | Path
+            Path to the CSV file.
+        """
+        return cls.from_df(pd.read_csv(fname))
+
+    def to_csv(self, fname: str | Path) -> None:
+        """
+        Save a list of candidates to a CSV file.
+
+        Parameters
+        ----------
+        fname: str | Path
+            Path to the CSV file.
+        """
+        self.to_df().to_csv(fname)

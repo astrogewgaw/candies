@@ -3,15 +3,16 @@ The feature extraction code for Candies.
 """
 
 import logging
+from pathlib import Path
+
 import h5py as h5
 import numpy as np
-from numba import cuda
-from pathlib import Path
-from rich.progress import track
-from rich.logging import RichHandler
+from candies.base import CandidateList, CandiesError, Dedispersed, DMTransform
 from candies.interfaces import Filterbank
-from candies.base import Dedispersed, DMTransform, CandidateList
-from candies.utilities import kdm, delay2dm, dm2delay, normalise
+from candies.utilities import delay2dm, dm2delay, kdm, normalise
+from numba import cuda
+from rich.logging import RichHandler
+from rich.progress import track
 
 
 @cuda.jit
@@ -182,11 +183,14 @@ def featurize(
     stream = cuda.stream()
     log.debug(f"Selected GPU {gpuid}.")
 
+    if not Path(filterbank).exists():
+        raise CandiesError(f"The file {filterbank} does not exist!")
+
     with Filterbank(filterbank) as fil:
         for candidate in track(
             candidates,
             disable=(not progressbar),
-            description="Featurizing...",
+            description=f"Featurizing from {filterbank}...",
         ):
             maxdelay = dm2delay(fil.fl, fil.fh, candidate.dm)
 

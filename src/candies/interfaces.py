@@ -3,12 +3,13 @@ I/O interfaces for Candies.
 """
 
 import mmap
-import numpy as np
-from typing import Self
-from pathlib import Path
-from priwo import readhdr
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Self
+
+import numpy as np
 from candies.base import CandiesError
+from priwo import readhdr
 
 
 @dataclass

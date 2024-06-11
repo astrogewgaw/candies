@@ -2,15 +2,14 @@
 The application code for Candies.
 """
 
-import random
-import cyclopts
 from pathlib import Path
-from typing import Optional
-from rich.table import Table
-from rich.progress import track
-from rich.console import Console
+
+import cyclopts
+from candies.base import Candidate, CandidateList
 from candies.features import featurize
-from candies.base import CandiesError, Candidate, CandidateList
+from rich.console import Console
+from rich.progress import track
+from rich.table import Table
 
 app = cyclopts.App()
 app["--help"].group = "Admin"
@@ -51,24 +50,19 @@ def make(
     show_progress: bool, optional
         Show the progress bar. True by default.
     """
-    candidates = CandidateList.fromcsv(candlist)
-    random.shuffle(candidates)
-
-    if fil is None:
-        fil, = set([_.fname for _ in candidates])
-        if fil is None:
-            raise CandiesError("No filterbank file given to process!")
-
-    featurize(
-        candidates=candidates,
-        filterbank=fil,
-        gpuid=gpuid,
-        save=save,
-        zoom=zoom,
-        fudging=fudging,
-        verbose=verbose,
-        progressbar=show_progress,
-    )
+    candidates = CandidateList.from_csv(candlist)
+    groups = candidates.to_df().groupby("file")
+    for fname, group in groups:
+        featurize(
+            save=save,
+            zoom=zoom,
+            gpuid=gpuid,
+            fudging=fudging,
+            verbose=verbose,
+            progressbar=show_progress,
+            candidates=CandidateList.from_df(group),
+            filterbank=str(fname) if fil is None else fil,
+        )
 
 
 @app.command
@@ -113,7 +107,7 @@ def list_(
             )
         console.print(table)
     if save:
-        candidates.tocsv(saveto)
+        candidates.to_csv(saveto)
 
 
 @app.command
