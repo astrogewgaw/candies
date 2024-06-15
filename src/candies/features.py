@@ -222,7 +222,7 @@ def featurize(
                 d = fil.get(offset=nbegin, count=fil.nt - nbegin)
                 dmedian = np.median(d, axis=1)
                 data = np.ones((fil.nf, nread), dtype=fil.dtype) * dmedian[:, None]
-                data[:, fil.nt - nbegin] = d
+                data[:, : fil.nt - nbegin] = d
 
             nf, nt = data.shape
             log.debug(f"Read in {nf} channels and {nt} samples.")
