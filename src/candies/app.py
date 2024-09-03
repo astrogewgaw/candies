@@ -5,11 +5,12 @@ The application code for Candies.
 from pathlib import Path
 
 import cyclopts
-from candies.base import Candidate, CandidateList
-from candies.features import featurize
-from rich.console import Console
-from rich.progress import track
 from rich.table import Table
+from rich.progress import track
+from rich.console import Console
+
+from candies.features import featurize
+from candies.base import Candidate, CandidateList
 
 app = cyclopts.App()
 app["--help"].group = "Admin"

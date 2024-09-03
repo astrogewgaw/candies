@@ -2,10 +2,10 @@
 The base code for Candies.
 """
 
-from collections.abc import MutableSequence
-from dataclasses import dataclass
-from pathlib import Path
 from typing import Self
+from pathlib import Path
+from dataclasses import dataclass
+from collections.abc import MutableSequence
 
 import h5py as h5
 import matplotlib
@@ -108,6 +108,7 @@ class Dedispersed:
 
     def plot(
         self,
+        dpi: int = 96,
         save: bool = True,
         show: bool = False,
         ax: pplt.Axes | None = None,
@@ -118,6 +119,8 @@ class Dedispersed:
 
         Parameters
         ----------
+        dpi: int, optional
+            The dots per pixel (dpi) of the saved plot. Set to 96 by default.
         save: bool, optional
             Save the plot to a PNG file. True by default.
         show: bool, optional
@@ -144,7 +147,7 @@ class Dedispersed:
             ax = fig.subplot()  # type: ignore
             _plot(ax)  # type: ignore
             if save:
-                fig.savefig(saveto)
+                fig.savefig(saveto, dpi=dpi)
             if show:
                 pplt.show()
             pplt.close(fig)
@@ -259,6 +262,7 @@ class DMTransform:
 
     def plot(
         self,
+        dpi: int = 96,
         save: bool = True,
         show: bool = False,
         ax: pplt.Axes | None = None,
@@ -269,6 +273,8 @@ class DMTransform:
 
         Parameters
         ----------
+        dpi: int, optional
+            The dots per pixel (dpi) of the saved plot. Set to 96 by default.
         save: bool, optional
             Save the plot to a PNG file. True by default.
         show: bool, optional
@@ -291,7 +297,7 @@ class DMTransform:
             ax = fig.subplot()  # type: ignore
             _plot(ax)  # type: ignore
             if save:
-                fig.savefig(saveto)
+                fig.savefig(saveto, dpi=dpi)
             if show:
                 pplt.show()
             pplt.close(fig)
@@ -386,6 +392,7 @@ class Candidate:
 
     def plot(
         self,
+        dpi: int = 96,
         save: bool = True,
         show: bool = False,
         saveto: str = "candidate.png",
@@ -395,6 +402,8 @@ class Candidate:
 
         Parameters
         ----------
+        dpi: int, optional
+            The dots per pixel (dpi) of the saved plot. Set to 96 by default.
         save: bool, optional
             Save the plot to a PNG file. True by default.
         show: bool, optional
@@ -462,7 +471,7 @@ class Candidate:
                 """
                 dd = int(dec / 1e4)
                 mm = int((dec - dd * 1e4) / 1e2)
-                ss = dec - dd * 1e4 - mm * 1e2
+                ss = dec - np.abs(dd) * 1e4 - mm * 1e2
                 return dd, mm, ss
 
             if self.extras is not None:
@@ -492,7 +501,7 @@ class Candidate:
             table.auto_set_font_size(False)
 
             if save:
-                fig.savefig(saveto)
+                fig.savefig(saveto, dpi=dpi)
             if show:
                 pplt.show()
             pplt.close(fig)
