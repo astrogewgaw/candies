@@ -3,13 +3,15 @@ I/O interfaces for Candies.
 """
 
 import mmap
-from dataclasses import dataclass
-from pathlib import Path
 from typing import Self
+from pathlib import Path
+from dataclasses import dataclass
 
 import numpy as np
-from candies.base import CandiesError
 from priwo import readhdr
+
+from candies.utilities import dm2delay
+from candies.base import CandiesError, Candidate
 
 
 @dataclass
@@ -79,4 +81,46 @@ class Filterbank:
         )
         data = data.reshape(-1, self.nf)
         data = data.T
+        return data
+
+    def chop(self, candidate: Candidate) -> np.ndarray:
+        """
+        Chops out a burst from this filterbank file.
+
+        Parameters
+        ----------
+        candidate: Candidate
+            The candidate burst to chop from this filterbank file.
+        """
+
+        maxdelay = dm2delay(self.fl, self.fh, candidate.dm)
+        binbeg = int((candidate.t0 - maxdelay) / self.dt) - candidate.wbin
+        binend = int((candidate.t0 + maxdelay) / self.dt) + candidate.wbin
+
+        nbegin = noffset = binbeg
+        nread = ncount = binend - binbeg
+        if (candidate.wbin > 2) and (nread // (candidate.wbin // 2) < 256):
+            nread = 256 * candidate.wbin // 2
+        elif nread < 256:
+            nread = 256
+        nbegin = noffset - (nread - ncount) // 2
+
+        if (nbegin >= 0) and (nbegin + nread) <= self.nt:
+            data = self.get(offset=nbegin, count=nread)
+        elif nbegin < 0:
+            if (nbegin + nread) <= self.nt:
+                d = self.get(offset=0, count=nread + nbegin)
+                dmedian = np.median(d, axis=1)
+                data = np.ones((self.nf, nread), dtype=self.dtype) * dmedian[:, None]
+                data[:, -nbegin:] = d
+            else:
+                d = self.get(offset=0, count=self.nt)
+                dmedian = np.median(d, axis=1)
+                data = np.ones((self.nf, nread), dtype=self.dtype) * dmedian[:, None]
+                data[:, -nbegin : -nbegin + self.nt] = d
+        else:
+            d = self.get(offset=nbegin, count=self.nt - nbegin)
+            dmedian = np.median(d, axis=1)
+            data = np.ones((self.nf, nread), dtype=self.dtype) * dmedian[:, None]
+            data[:, : self.nt - nbegin] = d
         return data
