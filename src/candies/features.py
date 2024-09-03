@@ -6,16 +6,16 @@ import logging
 from pathlib import Path
 
 import h5py as h5
-import numpy as np
-from candies.base import CandidateList, CandiesError, Dedispersed, DMTransform
-from candies.interfaces import Filterbank
-from candies.utilities import delay2dm, dm2delay, kdm, normalise
 from numba import cuda
-from rich.logging import RichHandler
 from rich.progress import track
+from rich.logging import RichHandler
+
+from candies.interfaces import Filterbank
+from candies.utilities import kdm, delay2dm, normalise
+from candies.base import CandidateList, CandiesError, Dedispersed, DMTransform
 
 
-@cuda.jit
+@cuda.jit(cache=True, fastmath=True)
 def dedisperse(
     dyn,
     ft,
@@ -70,7 +70,7 @@ def dedisperse(
         cuda.atomic.add(dyn, (int(fi / downf), int(ti / downt)), acc)  # type: ignore
 
 
-@cuda.jit
+@cuda.jit(cache=True, fastmath=True)
 def fastdmt(
     dmt,
     ft,
@@ -186,148 +186,125 @@ def featurize(
     if not Path(filterbank).exists():
         raise CandiesError(f"The file {filterbank} does not exist!")
 
-    with Filterbank(filterbank) as fil:
-        for candidate in track(
-            candidates,
-            disable=(not progressbar),
-            description=f"Featurizing from {filterbank}...",
-        ):
-            maxdelay = dm2delay(fil.fl, fil.fh, candidate.dm)
+    with stream.auto_synchronize():
+        with cuda.defer_cleanup():
+            with Filterbank(filterbank) as fil:
+                for candidate in track(
+                    candidates,
+                    disable=(not progressbar),
+                    description=f"Featurizing from {filterbank}...",
+                ):
+                    data = fil.chop(candidate)
+                    nf, nt = data.shape
+                    log.debug(f"Read in data with {nf} channels and {nt} samples.")
 
-            binbeg = int((candidate.t0 - maxdelay) / fil.dt) - candidate.wbin
-            binend = int((candidate.t0 + maxdelay) / fil.dt) + candidate.wbin
+                    ndms = 256
+                    dmlow, dmhigh = 0.0, 2 * candidate.dm
+                    if zoom:
+                        log.debug("Zoom-in feature active. Calculating DM range.")
+                        ddm = delay2dm(
+                            fil.fl, fil.fh, fudging * candidate.wbin * fil.dt
+                        )
+                        if ddm < candidate.dm:
+                            dmlow, dmhigh = candidate.dm - ddm, candidate.dm + ddm
+                    ddm = (dmhigh - dmlow) / (ndms - 1)
+                    log.debug(f"Using DM range: {dmlow} to {dmhigh} pc cm^-3.")
 
-            nbegin = noffset = binbeg
-            nread = ncount = binend - binbeg
-            if (candidate.wbin > 2) and (nread // (candidate.wbin // 2) < 256):
-                nread = 256 * candidate.wbin // 2
-            elif nread < 256:
-                nread = 256
-            nbegin = noffset - (nread - ncount) // 2
-
-            if (nbegin >= 0) and (nbegin + nread) <= fil.nt:
-                data = fil.get(offset=nbegin, count=nread)
-            elif nbegin < 0:
-                if (nbegin + nread) <= fil.nt:
-                    d = fil.get(offset=0, count=nread + nbegin)
-                    dmedian = np.median(d, axis=1)
-                    data = np.ones((fil.nf, nread), dtype=fil.dtype) * dmedian[:, None]
-                    data[:, -nbegin:] = d
-                else:
-                    d = fil.get(offset=0, count=fil.nt)
-                    dmedian = np.median(d, axis=1)
-                    data = np.ones((fil.nf, nread), dtype=fil.dtype) * dmedian[:, None]
-                    data[:, -nbegin : -nbegin + fil.nt] = d
-            else:
-                d = fil.get(offset=nbegin, count=fil.nt - nbegin)
-                dmedian = np.median(d, axis=1)
-                data = np.ones((fil.nf, nread), dtype=fil.dtype) * dmedian[:, None]
-                data[:, : fil.nt - nbegin] = d
-
-            nf, nt = data.shape
-            log.debug(f"Read in {nf} channels and {nt} samples.")
-
-            ndms = 256
-            dmlow, dmhigh = 0.0, 2 * candidate.dm
-            if zoom:
-                log.debug("Zoom-in feature acitve. Calculating DM range.")
-                ddm = delay2dm(fil.fl, fil.fh, fudging * candidate.wbin * fil.dt)
-                if ddm < candidate.dm:
-                    dmlow, dmhigh = candidate.dm - ddm, candidate.dm + ddm
-            ddm = (dmhigh - dmlow) / (ndms - 1)
-            log.debug(f"Using DM range: {dmlow} to {dmhigh} pc cm^-3.")
-
-            downf = int(fil.nf / 256)
-            downt = 1 if candidate.wbin < 3 else int(candidate.wbin / 2)
-            log.debug(f"Downsampling by {downf} in frequency and {downt} in time.")
-
-            nfdown = int(fil.nf / downf)
-            ntdown = int(nt / downt)
-
-            gpudata = cuda.to_device(data, stream=stream)
-            gpudd = cuda.device_array((nfdown, ntdown), order="C", stream=stream)
-            gpudmt = cuda.device_array((ndms, ntdown), order="C", stream=stream)
-
-            dedisperse[  # type: ignore
-                (int(fil.nf / 32), int(nt / 32)),
-                (32, 32),
-                stream,
-            ](
-                gpudd,
-                gpudata,
-                fil.nf,
-                nt,
-                fil.df,
-                fil.dt,
-                fil.fh,
-                candidate.dm,
-                downf,
-                downt,
-            )
-
-            fastdmt[  # type: ignore
-                nt,
-                ndms,
-                stream,
-            ](
-                gpudmt,
-                gpudata,
-                nf,
-                nt,
-                fil.df,
-                fil.dt,
-                fil.fh,
-                ddm,
-                dmlow,
-                downt,
-            )
-
-            ntmid = int(ntdown / 2)
-
-            dedispersed = gpudd.copy_to_host(stream=stream)
-            dedispersed = dedispersed[:, ntmid - 128 : ntmid + 128]
-            dedispersed = normalise(dedispersed)
-            candidate.dedispersed = Dedispersed(
-                fl=fil.fl,
-                fh=fil.fh,
-                nt=256,
-                nf=256,
-                dm=candidate.dm,
-                data=dedispersed,
-                dt=fil.dt * downt,
-                df=(fil.fh - fil.fl) / 256,
-            )
-
-            dmtransform = gpudmt.copy_to_host(stream=stream)
-            dmtransform = dmtransform[:, ntmid - 128 : ntmid + 128]
-            dmtransform = normalise(dmtransform)
-            candidate.dmtransform = DMTransform(
-                nt=256,
-                ddm=ddm,
-                ndms=ndms,
-                dmlow=dmlow,
-                dmhigh=dmhigh,
-                dm=candidate.dm,
-                dt=fil.dt * downt,
-                data=dmtransform,
-            )
-
-            if save:
-                mjd = fil.header.get("tstart", None)
-                fname = (
-                    "".join(
-                        [
-                            f"MJD{mjd:.7f}_" if mjd is not None else "",
-                            f"T{candidate.t0:.7f}_",
-                            f"DM{candidate.dm:.5f}_",
-                            f"SNR{candidate.snr:.5f}",
-                        ]
+                    downf = int(fil.nf / 256)
+                    downt = 1 if candidate.wbin < 3 else int(candidate.wbin / 2)
+                    log.debug(
+                        f"Downsampling by {downf} in frequency and {downt} in time."
                     )
-                    + ".h5"
-                )
-                candidate.save(fname)
-                with h5.File(fname, "a") as f:
-                    group = f.create_group("extras")
-                    for key, value in fil.header.items():
-                        group.attrs[key] = value
+
+                    nfdown = int(fil.nf / downf)
+                    ntdown = int(nt / downt)
+
+                    gpudata = cuda.to_device(data, stream=stream)
+                    gpudd = cuda.device_array(
+                        (nfdown, ntdown), order="C", stream=stream
+                    )
+                    gpudmt = cuda.device_array((ndms, ntdown), order="C", stream=stream)
+
+                    dedisperse[  # type: ignore
+                        (int(fil.nf / 32), int(nt / 32)),
+                        (32, 32),
+                        stream,
+                    ](
+                        gpudd,
+                        gpudata,
+                        fil.nf,
+                        nt,
+                        fil.df,
+                        fil.dt,
+                        fil.fh,
+                        candidate.dm,
+                        downf,
+                        downt,
+                    )
+
+                    fastdmt[  # type: ignore
+                        nt,
+                        ndms,
+                        stream,
+                    ](
+                        gpudmt,
+                        gpudata,
+                        nf,
+                        nt,
+                        fil.df,
+                        fil.dt,
+                        fil.fh,
+                        ddm,
+                        dmlow,
+                        downt,
+                    )
+
+                    ntmid = int(ntdown / 2)
+
+                    dedispersed = gpudd.copy_to_host(stream=stream)
+                    dedispersed = dedispersed[:, ntmid - 128 : ntmid + 128]
+                    dedispersed = normalise(dedispersed)
+                    candidate.dedispersed = Dedispersed(
+                        fl=fil.fl,
+                        fh=fil.fh,
+                        nt=256,
+                        nf=256,
+                        dm=candidate.dm,
+                        data=dedispersed,
+                        dt=fil.dt * downt,
+                        df=(fil.fh - fil.fl) / 256,
+                    )
+
+                    dmtransform = gpudmt.copy_to_host(stream=stream)
+                    dmtransform = dmtransform[:, ntmid - 128 : ntmid + 128]
+                    dmtransform = normalise(dmtransform)
+                    candidate.dmtransform = DMTransform(
+                        nt=256,
+                        ddm=ddm,
+                        ndms=ndms,
+                        dmlow=dmlow,
+                        dmhigh=dmhigh,
+                        dm=candidate.dm,
+                        dt=fil.dt * downt,
+                        data=dmtransform,
+                    )
+
+                    if save:
+                        mjd = fil.header.get("tstart", None)
+                        fname = (
+                            "".join(
+                                [
+                                    f"MJD{mjd:.7f}_" if mjd is not None else "",
+                                    f"T{candidate.t0:.7f}_",
+                                    f"DM{candidate.dm:.5f}_",
+                                    f"SNR{candidate.snr:.5f}",
+                                ]
+                            )
+                            + ".h5"
+                        )
+                        candidate.save(fname)
+                        with h5.File(fname, "a") as f:
+                            group = f.create_group("extras")
+                            for key, value in fil.header.items():
+                                group.attrs[key] = value
     cuda.close()
