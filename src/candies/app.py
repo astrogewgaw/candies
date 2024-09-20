@@ -144,8 +144,8 @@ def plot(
             else None
         )
         candidate.plot(
-            save,
-            show,
+            save=save,
+            show=show,
             saveto="".join(
                 [
                     f"MJD{mjd:.7f}_" if mjd is not None else "",
