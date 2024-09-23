@@ -65,28 +65,31 @@ Currently, we only support processing data stored in the SIGPROC filterbank form
 
 ## Installation
 
-[**`candies`**][candies] is not on PyPI yet. To install it directly via Github, either do:
-
+[**`candies`**][candies] is on PyPI, and hence can be installed by simply running:
+```bash
+pip install candies
+```
+In case you are interested in the cutting edge, you can also git clone and install it directly via Github:
 ```bash
 git clone https://github.com/astrogewgaw/candies
 cd candies
 pip install -e .
 ```
-
-or do:
-
+where the `-e` flag is for an *editable install*; that is, any changes to the source code will reflect directly in your installation. If you don't want that, just remove the flag, or you can go ahead and use the more direct method:
 ```bash
 pip install git+https://github.com/astrogewgaw/candies
 ```
-Mote that the `-e` flag is for an *editable install*; that is, any changes to the source code will reflect directly in your installation. If you don't want that, just remove the flag. We are trying to get [**`candies`**][candies] up on PyPI soon, which will make installing it as easy as:
 
-```bash
-pip install candies
-```
+> **Note**: To get plotting working in [**`candies`**][candies], you will have to install [**`proplot`**][proplot]. It is recommended that you do not do so via PyPI (that is, do not do `pip install proplot`). Instead, use the following command to install [**`proplot`**][proplot]:
+>
+>```bash
+>pip install git+https://github.com/proplot-dev/proplot.git@refs/pull/459/head
+>```
+> This is due to several issues with the `main` branch of [**`proplot`**][proplot] (see [\#461](https://github.com/proplot-dev/proplot/issues/461), [\#451](https://github.com/proplot-dev/proplot/issues/454), [\#453](https://github.com/proplot-dev/proplot/issues/453), [\#451](https://github.com/proplot-dev/proplot/issues/451), [\#432](https://github.com/proplot-dev/proplot/issues/432), [\#418](https://github.com/proplot-dev/proplot/issues/418), and [\#309](https://github.com/proplot-dev/proplot/issues/309)), which is incompatible with the latest versions of `matplotlib` and other packages. Installing from the as-of-yet-unmerged pull request above solves this issue. In case [**`proplot`**][proplot] is not installed, plotting will fail, and raise an error.
 
 ## Quick Guide
 
-For help with how to use candies, just type and run `candies` or `candies --help`. To process a list of FRB candidates stored as a CSV file, just use the command:
+For help with how to use [**`candies`**][candies], just type and run `candies` or `candies --help`. To process a list of FRB candidates stored as a CSV file, just use the command:
 
 ```bash
 candies make /path/to/candidate/list
@@ -98,13 +101,13 @@ To see what additional options you can use, just type `candies make --help`. To 
 candies plot /path/to/HDF5/files
 ```
 
-Once more, type `candies plot --help` to see what options are available to you. You can also generate a list of candidates on the terminal, via:
+Once more, type `candies plot --help` to see what options are available to you. Note that the plotting command will only work if you have [**`proplot`**][proplot] installed; see the note above regarding the same. You can also generate a list of candidates on the terminal, via:
 
 ```bash
 candies list /path/to/HDF5/files
 ```
 
-You can also use the above command to save the details as a CSV file, for later use.
+This command is useful is you just have a bunch of HDF5 files generated via [**`candies`**][candies], and you want to have a quick look at their details. You can also save these details as a CSV file, for later use.
 
 [^1]: This is roughly equivalent to India's per day internet traffic!
 
