@@ -114,8 +114,10 @@ def list_(
 @app.command
 def plot(
     candfiles: list[str | Path],
-    show: bool = False,
+    dpi: int = 96,
     save: bool = True,
+    show: bool = False,
+    saveto: str | None = None,
     show_progress: bool = True,
 ):
     """
@@ -144,17 +146,22 @@ def plot(
             else None
         )
         candidate.plot(
+            dpi=dpi,
             save=save,
             show=show,
-            saveto="".join(
-                [
-                    f"MJD{mjd:.7f}_" if mjd is not None else "",
-                    f"T{candidate.t0:.7f}_",
-                    f"DM{candidate.dm:.5f}_",
-                    f"SNR{candidate.snr:.5f}",
-                ]
-            )
-            + ".png",
+            saveto=(
+                "".join(
+                    [
+                        f"MJD{mjd:.7f}_" if mjd is not None else "",
+                        f"T{candidate.t0:.7f}_",
+                        f"DM{candidate.dm:.5f}_",
+                        f"SNR{candidate.snr:.5f}",
+                    ]
+                )
+                + ".png"
+                if saveto is None
+                else saveto
+            ),
         )
 
 

@@ -141,15 +141,33 @@ class Dedispersed:
             px.set_yticks([])
 
             ax.format(xlabel=r"$\Delta t$ (in ms)", ylabel="Frequency (in MHz)")
-            ax.pcolormesh(self.times, self.freqs, self.data, cmap="batlow")
-            ax.invert_yaxis()
+
+            flagged = np.all(self.data == self.data[0, :], axis=1)
+            X = self.data.copy()
+            X[flagged, :] = np.nan
+
+            ax.imshow(
+                X,
+                aspect="auto",
+                cmap="batlow",
+                interpolation="none",
+                extent=[
+                    self.times[0],
+                    self.times[-1],
+                    self.freqs[-1],
+                    self.freqs[0],
+                ],
+                vmin=np.nanmean(X) - 5 * np.nanstd(X),
+                vmax=np.nanmean(X) + 5 * np.nanstd(X),
+            )
 
         if ax is None:
             if not show:
                 matplotlib.use("agg")
             fig = pplt.figure()
-            ax = fig.subplot()  # type: ignore
-            _plot(ax)  # type: ignore
+            ax = fig.subplots(nrows=1, ncols=1)[0]
+            assert ax is not None
+            _plot(ax)
             if save:
                 fig.savefig(saveto, dpi=dpi)
             if show:
@@ -291,15 +309,29 @@ class DMTransform:
 
         def _plot(ax: pplt.Axes):
             ax.format(xlabel=r"$\Delta t$ (in ms)", ylabel=r"DM (in pc cm$^{-3}$)")
-            ax.pcolormesh(self.times, self.dms, self.data, cmap="batlow")
-            ax.invert_yaxis()
+
+            ax.imshow(
+                self.data,
+                aspect="auto",
+                cmap="batlow",
+                interpolation="none",
+                extent=[
+                    self.times[0],
+                    self.times[-1],
+                    self.dms[-1],
+                    self.dms[0],
+                ],
+                vmin=self.data.mean() - 5 * self.data.std(),
+                vmax=self.data.mean() + 5 * self.data.std(),
+            )
 
         if ax is None:
             if not show:
                 matplotlib.use("agg")
             fig = pplt.figure()
-            ax = fig.subplot()  # type: ignore
-            _plot(ax)  # type: ignore
+            ax = fig.subplots(nrows=1, ncols=1)[0]
+            assert ax is not None
+            _plot(ax)
             if save:
                 fig.savefig(saveto, dpi=dpi)
             if show:
@@ -431,10 +463,11 @@ class Candidate:
                 "DM",
                 "SNR",
                 r"$W_{bin}$",
-                r"$N_{t}$",
-                r"$N_{\nu}$",
-                r"$\delta t$",
-                r"$\delta \nu$",
+                r"$N_{t}$ (original)",
+                r"$N_{t}$ (downsampled)",
+                r"$N_{\nu}$ (downsampled)",
+                r"$\delta t$ (downsampled)",
+                r"$\delta \nu$ (downsampled)",
                 r"$\nu_{first}$",
                 r"$\nu_{last}$",
                 r"$N_{DM}$",
@@ -448,6 +481,9 @@ class Candidate:
                 [f"{self.dm:.2f} pc cm$^{{-3}}$"],
                 [f"{self.snr:.2f}"],
                 [f"{self.wbin:d} bins"],
+                [
+                    f"{self.dedispersed.nt * (1 if self.wbin < 3 else int(self.wbin / 2)):d}"
+                ],
                 [f"{self.dedispersed.nt:d}"],
                 [f"{self.dedispersed.nf:d}"],
                 [rf"{self.dedispersed.dt * 1e6:.2f} $\mu$s"],
@@ -479,6 +515,18 @@ class Candidate:
                 return dd, mm, ss
 
             if self.extras is not None:
+                dtoriginal = self.extras["tsamp"]
+                nforiginal = self.extras["nchans"]
+                dforiginal = np.abs(self.extras["foff"])
+
+                labels.insert(5, r"$N_{\nu}$ (original)")
+                labels.insert(7, r"$\delta t$ (original)")
+                labels.insert(9, r"$\delta \nu$ (original)")
+
+                fields.insert(5, [f"{nforiginal:d}"])
+                fields.insert(7, [rf"{dtoriginal * 1e6:.2f} $\mu$s"])
+                fields.insert(9, [f"{dforiginal * 1e3:.2f} kHz"])
+
                 name = self.extras["source_name"]
                 ra = ":".join(map(str, sigproc_ra(self.extras["src_raj"])))
                 dec = ":".join(map(str, sigproc_dec(self.extras["src_dej"])))
