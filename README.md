@@ -80,12 +80,16 @@ where the `-e` flag is for an *editable install*; that is, any changes to the so
 pip install git+https://github.com/astrogewgaw/candies
 ```
 
-> **Note**: To get plotting working in [**`candies`**][candies], you will have to install [**`proplot`**][proplot]. It is recommended that you do not do so via PyPI (that is, do not do `pip install proplot`). Instead, use the following command to install [**`proplot`**][proplot]:
+> **Note**: To get plotting working in [**`candies`**][candies], you will have to install [**`proplot`**][proplot]. It is recommended that you do not do so via PyPI (that is, do not do `pip install proplot`). Instead, use the following command to install [**`proplot`**][proplot] (for `matplotlib` `v3.6` and above):
 >
 >```bash
 >pip install git+https://github.com/proplot-dev/proplot.git@refs/pull/459/head
 >```
-> This is due to several issues with the `main` branch of [**`proplot`**][proplot] (see [\#461](https://github.com/proplot-dev/proplot/issues/461), [\#451](https://github.com/proplot-dev/proplot/issues/454), [\#453](https://github.com/proplot-dev/proplot/issues/453), [\#451](https://github.com/proplot-dev/proplot/issues/451), [\#432](https://github.com/proplot-dev/proplot/issues/432), [\#418](https://github.com/proplot-dev/proplot/issues/418), and [\#309](https://github.com/proplot-dev/proplot/issues/309)), which is incompatible with the latest versions of `matplotlib` and other packages. Installing from the as-of-yet-unmerged pull request above solves this issue. In case [**`proplot`**][proplot] is not installed, plotting will fail, and raise an error.
+> or (for `matplotlib` `v3.5` and below):
+>```bash
+>pip install git+https://github.com/proplot-dev/proplot
+>```
+> This is due to several issues with the `main` branch of [**`proplot`**][proplot] (see [\#461](https://github.com/proplot-dev/proplot/issues/461), [\#451](https://github.com/proplot-dev/proplot/issues/454), [\#453](https://github.com/proplot-dev/proplot/issues/453), [\#451](https://github.com/proplot-dev/proplot/issues/451), [\#432](https://github.com/proplot-dev/proplot/issues/432), [\#418](https://github.com/proplot-dev/proplot/issues/418), and [\#309](https://github.com/proplot-dev/proplot/issues/309)), which is incompatible with the latest versions of `matplotlib` and other packages. Installing from the as-of-yet-unmerged pull request above solves this issue. For `matplotlib` versions below `v3.5`, the `main` branch works fine. In case [**`proplot`**][proplot] is not installed, plotting will fail, and raise an error.
 
 ## Quick Guide
 
