@@ -65,13 +65,7 @@ Currently, we only support processing data stored in the SIGPROC filterbank form
 
 ## Installation
 
-[**`candies`**][candies] is on PyPI, and hence can be installed by simply running:
-
-```bash
-pip install candies
-```
-
-In case you are interested in the cutting edge, you can also git clone and install it directly via Github:
+[**`candies`**][candies] is not on PyPI yet. To install it directly via Github, either do:
 
 ```bash
 git clone https://github.com/astrogewgaw/candies
@@ -79,10 +73,15 @@ cd candies
 pip install -e .
 ```
 
-where the `-e` flag is for an *editable install*; that is, any changes to the source code will reflect directly in your installation. If you don't want that, just remove the flag, or you can go ahead and use the more direct method:
+or do:
 
 ```bash
 pip install git+https://github.com/astrogewgaw/candies
+```
+Mote that the `-e` flag is for an *editable install*; that is, any changes to the source code will reflect directly in your installation. If you don't want that, just remove the flag. We are trying to get [**`candies`**][candies] up on PyPI soon, which will make installing it as easy as:
+
+```bash
+pip install candies
 ```
 
 ## Quick Guide
