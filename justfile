@@ -17,7 +17,7 @@ default:
     from rich.console import Console
 
     console = Console()
-    
+
     grid = Table.grid(expand=True, padding=(0, 2, 0, 2))
     grid.add_column(justify="left", style="bold")
     grid.add_column(justify="right", style="italic")
@@ -76,4 +76,4 @@ default:
 # Build docs.
 @docs:
     echo "Building docs for {{pkg}}..."
-    sphinx-autobuild docs/source docs/build
+    sphinx-reload docs
