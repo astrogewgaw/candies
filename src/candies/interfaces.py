@@ -3,7 +3,6 @@ I/O interfaces for candies.
 """
 
 import mmap
-from typing import Self
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -22,7 +21,7 @@ class SIGPROCFilterbank:
 
     filepath: str | Path
 
-    def __enter__(self) -> Self:
+    def __enter__(self):
         self.header = readhdr(str(self.filepath))
 
         try:

@@ -2,7 +2,6 @@
 The base code for candies.
 """
 
-from typing import Self
 from pathlib import Path
 from dataclasses import dataclass
 from collections.abc import MutableSequence
@@ -62,7 +61,7 @@ class Dedispersed:
     data: np.ndarray
 
     @classmethod
-    def load(cls, fname: str | Path) -> Self:
+    def load(cls, fname: str | Path):
         """
         Load a dedispersed dynamic spectrum from a HDF5 file.
 
@@ -242,7 +241,7 @@ class DMTransform:
     data: np.ndarray
 
     @classmethod
-    def load(cls, fname: str | Path) -> Self:
+    def load(cls, fname: str | Path):
         """
         Load a Dm transform from a HDF5 file.
 
@@ -417,7 +416,7 @@ class Candidate:
         return self.__str__()
 
     @classmethod
-    def load(cls, fname: str | Path) -> Self:
+    def load(cls, fname: str | Path):
         """
         Load a candy-date from a HDF5 file.
 
@@ -634,7 +633,7 @@ class CandidateList(MutableSequence):
         self.candidates.insert(index, value)
 
     @classmethod
-    def from_df(cls, df: pd.DataFrame) -> Self:
+    def from_df(cls, df: pd.DataFrame):
         """
         Get a list of candy-dates from `pandas` DataFrame.
 
@@ -683,7 +682,7 @@ class CandidateList(MutableSequence):
         )
 
     @classmethod
-    def from_csv(cls, fname: str | Path) -> Self:
+    def from_csv(cls, fname: str | Path):
         """
         Get a list of candy-dates from a CSV file.
 
