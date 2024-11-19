@@ -1,12 +1,8 @@
 """
-The base code for Candies.
+The base code for candies.
 """
 
-try:
-    from typing import Self
-except ImportError:
-    from typing_extensions import Self
-
+from typing import Self
 from pathlib import Path
 from dataclasses import dataclass
 from collections.abc import MutableSequence
@@ -20,7 +16,7 @@ import proplot as pplt
 
 class CandiesError(Exception):
     """
-    Represents any error in Candies.
+    Represents any error in candies.
     """
 
     pass
@@ -112,6 +108,7 @@ class Dedispersed:
 
     def plot(
         self,
+        /,
         dpi: int = 96,
         save: bool = True,
         show: bool = False,
@@ -284,6 +281,7 @@ class DMTransform:
 
     def plot(
         self,
+        /,
         dpi: int = 96,
         save: bool = True,
         show: bool = False,
@@ -370,29 +368,29 @@ class DMTransform:
 @dataclass
 class Candidate:
     """
-    Represents a FRB candidate.
+    Represents a FRB candy-date.
 
     Parameters
     ----------
     dm: float
-        The dispersion masure (DM) of the candidate (in pc cm^-3).
+        The dispersion masure (DM) of the candy-date (in pc cm^-3).
     t0: float
-        The arrival time of the candidate (in seconds).
+        The arrival time of the candy-date (in seconds).
     wbin: int
-        The width of the candidate (in terms of number of bins/samples).
+        The width of the candy-date (in terms of number of bins/samples).
     snr: float
-        The signal-to-noise ratio (SNR) of the candidate.
+        The signal-to-noise ratio (SNR) of the candy-date.
     extras: dict, optional
-        Any extra metadata about this candidate. Typically includes metadata
-        obtained from the file from which the candidate's data was obtained.
+        Any extra metadata about this candy-date. Typically includes metadata
+        obtained from the file from which the candy-date's data was obtained.
         Including this is optional; by default, it is None.
     dedispersed: np.ndarray, optional
         The dedispersed dynamic spectrum. It is None by default, since it can
-        only be obtained after a candidate has been processed. Otherwise it is
+        only be obtained after a candy-date has been processed. Otherwise it is
         a 2D Numpy array.
     dmtransform: np.ndarray, optional
         The DM transform. It is None by default, since it can only be obtained
-        after a candidate has been processed. Otherwise it is a 2D Numpy array.
+        after a candy-date has been processed. Otherwise it is a 2D Numpy array.
     """
 
     dm: float
@@ -404,10 +402,24 @@ class Candidate:
     dedispersed: Dedispersed | None = None
     dmtransform: DMTransform | None = None
 
+    def __str__(self) -> str:
+        mjd = self.extras.get("tstart", None) if self.extras is not None else None
+        return "".join(
+            [
+                f"MJD{mjd:.7f}_" if mjd is not None else "",
+                f"T{self.t0:.7f}_",
+                f"DM{self.dm:.5f}_",
+                f"SNR{self.snr:.5f}",
+            ]
+        )
+
+    def __repr__(self) -> str:
+        return self.__str__()
+
     @classmethod
     def load(cls, fname: str | Path) -> Self:
         """
-        Load a candidate from a HDF5 file.
+        Load a candy-date from a HDF5 file.
 
         Parameters
         ----------
@@ -428,13 +440,14 @@ class Candidate:
 
     def plot(
         self,
+        /,
         dpi: int = 96,
         save: bool = True,
         show: bool = False,
         saveto: str = "candidate.png",
     ):
         """
-        Plot a candidate.
+        Plot a candy-date.
 
         Parameters
         ----------
@@ -560,7 +573,7 @@ class Candidate:
 
     def save(self, fname: str | Path) -> None:
         """
-        Save a candidate to a HDF5 file.
+        Save a candy-date to a HDF5 file.
 
         Parameters
         ----------
@@ -576,17 +589,21 @@ class Candidate:
                 self.dedispersed.save(fname)
             if self.dmtransform is not None:
                 self.dmtransform.save(fname)
+            if self.extras is not None:
+                group = f.create_group("extras")
+                for key, value in self.extras.items():
+                    group.attrs[key] = value
 
 
 @dataclass
 class CandidateList(MutableSequence):
     """
-    Represents a list of candidates.
+    Represents a list of candy-dates.
 
     Parameters
     ----------
-    candidates: list[Candidate]
-        A list of candidates.
+    candy-dates: list[Candidate]
+        A list of candy-dates.
     """
 
     candidates: list[Candidate]
@@ -605,37 +622,37 @@ class CandidateList(MutableSequence):
 
     def insert(self, index, value: Candidate):
         """
-        Insert a candidate into the list at a particular index.
+        Insert a candy-date into the list at a particular index.
 
         Parameters
         ----------
         index: int
-            The index at which to insert the candidate.
+            The index at which to insert the candy-date.
         value: Candidate
-            The candidate to insert.
+            The candy-date to insert.
         """
         self.candidates.insert(index, value)
 
     @classmethod
     def from_df(cls, df: pd.DataFrame) -> Self:
         """
-        Get a list of candidates from `pandas` DataFrame.
+        Get a list of candy-dates from `pandas` DataFrame.
 
         Parameters
         ----------
         df: pandas.DataFrame
-            The DataFrame which contains the list of candidates.
+            The DataFrame which contains the list of candy-dates.
         """
         return cls(
             candidates=[
                 Candidate(
                     **(
                         {
-                            "dm": float(row["dm"]),
+                            "fname": str(row.get("file", None)),
                             "snr": float(row["snr"]),
-                            "wbin": int(row["width"]),
                             "t0": float(row["stime"]),
-                            "fname": str(row["file"]),
+                            "wbin": int(row["width"]),
+                            "dm": float(row["dm"]),
                         }
                     )
                 )
@@ -645,7 +662,7 @@ class CandidateList(MutableSequence):
 
     def to_df(self) -> pd.DataFrame:
         """
-        Convert a list of candidates to a `pandas` DataFrame.
+        Convert a list of candy-dates to a `pandas` DataFrame.
         """
         return pd.DataFrame(
             [
@@ -668,7 +685,7 @@ class CandidateList(MutableSequence):
     @classmethod
     def from_csv(cls, fname: str | Path) -> Self:
         """
-        Get a list of candidates from a CSV file.
+        Get a list of candy-dates from a CSV file.
 
         Parameters
         ----------
@@ -679,7 +696,7 @@ class CandidateList(MutableSequence):
 
     def to_csv(self, fname: str | Path) -> None:
         """
-        Save a list of candidates to a CSV file.
+        Save a list of candy-dates to a CSV file.
 
         Parameters
         ----------

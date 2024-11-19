@@ -1,26 +1,21 @@
 """
-I/O interfaces for Candies.
+I/O interfaces for candies.
 """
 
 import mmap
-
-try:
-    from typing import Self
-except ImportError:
-    from typing_extensions import Self
-
+from typing import Self
 from pathlib import Path
 from dataclasses import dataclass
 
 import numpy as np
-from priwo import readhdr
+from priwo import readhdr, writefil
 
 from candies.utilities import dm2delay
 from candies.base import CandiesError, Candidate
 
 
 @dataclass
-class Filterbank:
+class SIGPROCFilterbank:
     """
     Context manager to read data from a SIGPROC filterbank file.
     """
@@ -28,7 +23,7 @@ class Filterbank:
     filepath: str | Path
 
     def __enter__(self) -> Self:
-        self.header = readhdr(self.filepath)
+        self.header = readhdr(str(self.filepath))
 
         try:
             self.fh = self.header["fch1"]
@@ -75,7 +70,7 @@ class Filterbank:
 
     def get(self, offset: int, count: int) -> np.ndarray:
         """
-        Get data from a SIGPROC filterbank file.
+        Get data from this file.
         """
 
         data = np.frombuffer(
@@ -88,14 +83,14 @@ class Filterbank:
         data = data.T
         return data
 
-    def chop(self, candidate: Candidate) -> np.ndarray:
+    def chop(self, candidate: Candidate) -> tuple[float, float, np.ndarray]:
         """
-        Chops out a burst from this filterbank file.
+        Chops out a candy-date from this file.
 
         Parameters
         ----------
         candidate: Candidate
-            The candidate burst to chop from this filterbank file.
+            The candy-date to chop.
         """
 
         maxdelay = dm2delay(self.fl, self.fh, candidate.dm)
@@ -128,4 +123,21 @@ class Filterbank:
             dmedian = np.median(d, axis=1)
             data = np.ones((self.nf, nread), dtype=self.dtype) * dmedian[:, None]
             data[:, : self.nt - nbegin] = d
-        return data
+        tbeg = nbegin * self.dt
+        tend = tbeg + (nread * self.dt)
+        return tbeg, tend, data
+
+    def store(self, candidate: Candidate) -> None:
+        """
+        Store a candy-date from this file.
+
+        Parameters
+        ----------
+        candidates: Candidate
+            The candy-date to store.
+        """
+        meta = self.header.copy()
+        meta["refdm"] = candidate.dm
+        tbeg, _, data = self.chop(candidate)
+        meta["tstart"] = meta["tstart"] + tbeg / 86400.0
+        writefil(meta, data, "".join([str(candidate), ".fil"]))

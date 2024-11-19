@@ -1,5 +1,5 @@
 """
-Utility functions for Candies.
+Utility functions for candies.
 """
 
 import numpy as np
@@ -12,16 +12,16 @@ kdm: float = 4.1488064239e3
 
 def normalise(data: np.ndarray):
     """
-    Normalise the data using a MAD-based prescription.
+    Normalise the data via median subtraction.
 
     Parameters
     ----------
     data: np.ndarray
-        The data to normalise as a Numpy array.
+        The data to normalise.
 
     Returns
     -------
-    The normalised data as a Numpy array.
+    The normalised data.
     """
     data = np.array(data, dtype=np.float32)
     data -= np.median(data)

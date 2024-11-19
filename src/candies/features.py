@@ -1,18 +1,24 @@
 """
-The feature extraction code for Candies.
+The feature extraction code for candies.
 """
 
 import logging
 from pathlib import Path
 
-import h5py as h5
 from numba import cuda
 from rich.progress import track
 from rich.logging import RichHandler
 
-from candies.interfaces import Filterbank
+from candies.interfaces import SIGPROCFilterbank
 from candies.utilities import kdm, delay2dm, normalise
-from candies.base import CandidateList, CandiesError, Dedispersed, DMTransform
+
+from candies.base import (
+    Candidate,
+    Dedispersed,
+    DMTransform,
+    CandiesError,
+    CandidateList,
+)
 
 
 @cuda.jit(cache=True, fastmath=True)
@@ -127,8 +133,9 @@ def fastdmt(
 
 
 def featurize(
-    candidates: CandidateList,
+    candidates: Candidate | CandidateList,
     filterbank: str | Path,
+    /,
     gpuid: int = 0,
     save: bool = True,
     zoom: bool = True,
@@ -137,28 +144,28 @@ def featurize(
     progressbar: bool = False,
 ):
     """
-    Create the features for a list of candidates.
+    Create the features for a list of candy-dates.
 
-    The classifier uses two features for each candidate: the dedispersed
+    The classifier uses two features for each candy-date: the dedispersed
     dynamic spectrum, and the DM transform. These two features are created
-    by this function for each candidate in a list, using JIT-compiled CUDA
+    by this function for each candy-date in a list, using JIT-compiled CUDA
     kernels created via Numba for each feature.
 
     We also improve these features, by 1. zooming into the DM-time plane by
-    a factor decided by the arrival time, width, DM of each candidate, and/or
+    a factor decided by the arrival time, width, DM of each candy-date, and/or
     2. subbanding the frequency-time plane in case of band-limited emission.
     Currently only the former has been implemented.
 
     Parameters
     ----------
-    candidates: CandidateList
-        A list of candidates to process.
+    candidates: Candidate or CandidateList
+        A candy-date, or a list of candy-dates, to process.
     filterbank: str | Path
         The path of the filterbank file to process.
     gpuid: int, optional
         The ID of the GPU to be used. The default value is 0.
     save: bool, optional
-        Flag to decide whether to save the candidates or not. Default is True.
+        Flag to decide whether to save the candy-date(s) or not. Default is True.
     zoom: bool, optional
         Flag to switch on zooming into the DM-time plane. Default is True.
     fudging: int, optional
@@ -170,6 +177,8 @@ def featurize(
     progressbar: bool, optional
         Show the progress bar. True by default.
     """
+    if isinstance(candidates, Candidate):
+        candidates = CandidateList(candidates=[candidates])
 
     logging.basicConfig(
         datefmt="[%X]",
@@ -188,13 +197,13 @@ def featurize(
 
     with stream.auto_synchronize():
         with cuda.defer_cleanup():
-            with Filterbank(filterbank) as fil:
+            with SIGPROCFilterbank(filterbank) as fil:
                 for candidate in track(
                     candidates,
                     disable=(not progressbar),
                     description=f"Featurizing from {filterbank}...",
                 ):
-                    data = fil.chop(candidate)
+                    _, _, data = fil.chop(candidate)
                     nf, nt = data.shape
                     log.debug(f"Read in data with {nf} channels and {nt} samples.")
 
@@ -290,21 +299,7 @@ def featurize(
                     )
 
                     if save:
-                        mjd = fil.header.get("tstart", None)
-                        fname = (
-                            "".join(
-                                [
-                                    f"MJD{mjd:.7f}_" if mjd is not None else "",
-                                    f"T{candidate.t0:.7f}_",
-                                    f"DM{candidate.dm:.5f}_",
-                                    f"SNR{candidate.snr:.5f}",
-                                ]
-                            )
-                            + ".h5"
-                        )
+                        candidate.extras = {**fil.header}
+                        fname = "".join([str(candidate), ".h5"])
                         candidate.save(fname)
-                        with h5.File(fname, "a") as f:
-                            group = f.create_group("extras")
-                            for key, value in fil.header.items():
-                                group.attrs[key] = value
     cuda.close()
