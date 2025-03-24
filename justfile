@@ -41,7 +41,7 @@ default:
 # Chart LOCs.
 @loc:
     echo "Charting LOCs..."
-    tokei src tests -o json | tokei-pie
+    tokei src -o json | tokei-pie
 
 # Clean up.
 @clean:

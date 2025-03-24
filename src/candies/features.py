@@ -2,16 +2,14 @@
 The feature extraction code for candies.
 """
 
-import logging
 from pathlib import Path
 
 from numba import cuda
 from rich.progress import track
-from rich.logging import RichHandler
 
+from candies.base import log
 from candies.interfaces import SIGPROCFilterbank
 from candies.utilities import kdm, delay2dm, normalise
-
 from candies.base import (
     Candidate,
     Dedispersed,
@@ -19,117 +17,6 @@ from candies.base import (
     CandiesError,
     CandidateList,
 )
-
-
-@cuda.jit(cache=True, fastmath=True)
-def dedisperse(
-    dyn,
-    ft,
-    nf: int,
-    nt: int,
-    df: float,
-    dt: float,
-    fh: float,
-    dm: float,
-    downf: int,
-    downt: int,
-):
-    """
-    The JIT-compiled CUDA kernel for dedispersing a dynamic spectrum.
-
-    Parameters
-    ----------
-    dyn:
-        The array in which to place the output dedispersed dynamic spectrum.
-    ft:
-        The dynamic spectrum to dedisperse.
-    nf: int
-        The number of frequency channels.
-    nt: int
-        The number of time samples.
-    df: float
-        The channel width (in MHz).
-    dt: float
-        The sampling time (in seconds).
-    fh: float
-        The highest frequency in the band.
-    dm: float
-        The DM at which to dedisperse (in pc cm^-3).
-    downf: int,
-        The downsampling factor along the frequency axis.
-    downt: int,
-        The downsampling factor along the time axis.
-    """
-
-    fi, ti = cuda.grid(2)  # type: ignore
-
-    acc = 0.0
-    if fi < nf and ti < nt:
-        k1 = kdm * dm / dt
-        k2 = k1 * fh**-2
-        f = fh - fi * df
-        dbin = int(round(k1 * f**-2 - k2))
-        xti = ti + dbin
-        if xti >= nt:
-            xti -= nt
-        acc += ft[fi, xti]
-        cuda.atomic.add(dyn, (int(fi / downf), int(ti / downt)), acc)  # type: ignore
-
-
-@cuda.jit(cache=True, fastmath=True)
-def fastdmt(
-    dmt,
-    ft,
-    nf: int,
-    nt: int,
-    df: float,
-    dt: float,
-    fh: float,
-    ddm: float,
-    dmlow: float,
-    downt: int,
-):
-    """
-    The JIT-compiled CUDA kernel for obtaining a DM transform.
-
-    Parameters
-    ----------
-    dmt:
-        The array in which to place the output DM transform.
-    ft:
-        The dynamic spectrum to dedisperse.
-    nf: int
-        The number of frequency channels.
-    nt: int
-        The number of time samples.
-    df: float
-        The channel width (in MHz).
-    dt: float
-        The sampling time (in seconds).
-    fh: float
-        The highest frequency in the band.
-    ddm: float
-        The DM step to use (in pc cm^-3)
-    dmlow: float
-        The lowest DM value (in pc cm^-3).
-    downt: int,
-        The downsampling factor along the time axis.
-    """
-
-    ti = int(cuda.blockIdx.x)  # type: ignore
-    dmi = int(cuda.threadIdx.x)  # type: ignore
-
-    acc = 0.0
-    k1 = kdm * (dmlow + dmi * ddm) / dt
-    k2 = k1 * fh**-2
-    for fi in range(nf):
-        f = fh - fi * df
-        dbin = int(round(k1 * f**-2 - k2))
-        xti = ti + dbin
-        if xti >= nt:
-            xti -= nt
-        acc += ft[fi, xti]
-    cuda.atomic.add(dmt, (dmi, int(ti / downt)), acc)  # type: ignore
 
 
 def featurize(
@@ -140,7 +27,6 @@ def featurize(
     save: bool = True,
     zoom: bool = True,
     fudging: int = 512,
-    verbose: bool = False,
     progressbar: bool = False,
 ):
     """
@@ -160,7 +46,7 @@ def featurize(
     ----------
     candidates: Candidate or CandidateList
         A candy-date, or a list of candy-dates, to process.
-    filterbank: str | Path
+    filterbank: str or Path, optional
         The path of the filterbank file to process.
     gpuid: int, optional
         The ID of the GPU to be used. The default value is 0.
@@ -177,129 +63,224 @@ def featurize(
     progressbar: bool, optional
         Show the progress bar. True by default.
     """
+    if not Path(filterbank).exists():
+        raise CandiesError(f"The file {filterbank} does not exist!")
     if isinstance(candidates, Candidate):
         candidates = CandidateList(candidates=[candidates])
 
-    logging.basicConfig(
-        datefmt="[%X]",
-        format="%(message)s",
-        level=("DEBUG" if verbose else "INFO"),
-        handlers=[RichHandler(rich_tracebacks=True)],
-    )
-    log = logging.getLogger("candies")
-
     cuda.select_device(gpuid)
-    stream = cuda.stream()
+    ctx = cuda.current_context()
     log.debug(f"Selected GPU {gpuid}.")
 
-    if not Path(filterbank).exists():
-        raise CandiesError(f"The file {filterbank} does not exist!")
+    @cuda.jit(cache=True, fastmath=True)
+    def dedisperse(
+        dyn,
+        ft,
+        nf: int,
+        nt: int,
+        df: float,
+        dt: float,
+        fh: float,
+        dm: float,
+        ffact: int,
+        tfact: int,
+    ):
+        """
+        The JIT-compiled CUDA kernel for dedispersing a dynamic spectrum.
 
-    with stream.auto_synchronize():
-        with cuda.defer_cleanup():
-            with SIGPROCFilterbank(filterbank) as fil:
-                for candidate in track(
-                    candidates,
-                    disable=(not progressbar),
-                    description=f"Featurizing from {filterbank}...",
-                ):
-                    _, _, data = fil.chop(candidate)
-                    nf, nt = data.shape
-                    log.debug(f"Read in data with {nf} channels and {nt} samples.")
+        Parameters
+        ----------
+        dyn:
+            The array in which to place the output dedispersed dynamic spectrum.
+        ft:
+            The dynamic spectrum to dedisperse.
+        nf: int
+            The number of frequency channels.
+        nt: int
+            The number of time samples.
+        df: float
+            The channel width (in MHz).
+        dt: float
+            The sampling time (in seconds).
+        fh: float
+            The highest frequency in the band.
+        dm: float
+            The DM at which to dedisperse (in pc cm^-3).
+        ffact: int,
+            The downsampling factor along the frequency axis.
+        tfact: int,
+            The downsampling factor along the time axis.
+        """
 
-                    ndms = 256
-                    dmlow, dmhigh = 0.0, 2 * candidate.dm
-                    if zoom:
-                        log.debug("Zoom-in feature active. Calculating DM range.")
-                        ddm = delay2dm(
-                            fil.fl, fil.fh, fudging * candidate.wbin * fil.dt
-                        )
-                        if ddm < candidate.dm:
-                            dmlow, dmhigh = candidate.dm - ddm, candidate.dm + ddm
-                    ddm = (dmhigh - dmlow) / (ndms - 1)
-                    log.debug(f"Using DM range: {dmlow} to {dmhigh} pc cm^-3.")
+        fi, ti = cuda.grid(2)  # type: ignore
 
-                    downf = int(fil.nf / 256)
-                    downt = 1 if candidate.wbin < 3 else int(candidate.wbin / 2)
-                    log.debug(
-                        f"Downsampling by {downf} in frequency and {downt} in time."
-                    )
+        acc = 0.0
+        if fi < nf and ti < nt:
+            k1 = kdm * dm / dt
+            k2 = k1 * fh**-2
+            f = fh - fi * df
+            dbin = int(round(k1 * f**-2 - k2))
+            xti = ti + dbin
+            if xti >= nt:
+                xti -= nt
+            acc += ft[fi, xti]
+            cuda.atomic.add(dyn, (int(fi / ffact), int(ti / tfact)), acc)  # type: ignore
 
-                    nfdown = int(fil.nf / downf)
-                    ntdown = int(nt / downt)
+    @cuda.jit(cache=True, fastmath=True)
+    def fastdmt(
+        dmt,
+        ft,
+        nf: int,
+        nt: int,
+        df: float,
+        dt: float,
+        fh: float,
+        ddm: float,
+        dmlow: float,
+        tfact: int,
+    ):
+        """
+        The JIT-compiled CUDA kernel for obtaining a DM transform.
 
-                    gpudata = cuda.to_device(data, stream=stream)
-                    gpudd = cuda.device_array(
-                        (nfdown, ntdown), order="C", stream=stream
-                    )
-                    gpudmt = cuda.device_array((ndms, ntdown), order="C", stream=stream)
+        Parameters
+        ----------
+        dmt:
+            The array in which to place the output DM transform.
+        ft:
+            The dynamic spectrum to dedisperse.
+        nf: int
+            The number of frequency channels.
+        nt: int
+            The number of time samples.
+        df: float
+            The channel width (in MHz).
+        dt: float
+            The sampling time (in seconds).
+        fh: float
+            The highest frequency in the band.
+        ddm: float
+            The DM step to use (in pc cm^-3)
+        dmlow: float
+            The lowest DM value (in pc cm^-3).
+        tfact: int,
+            The downsampling factor along the time axis.
+        """
 
-                    dedisperse[  # type: ignore
-                        (int(fil.nf / 32), int(nt / 32)),
-                        (32, 32),
-                        stream,
-                    ](
-                        gpudd,
-                        gpudata,
-                        fil.nf,
-                        nt,
-                        fil.df,
-                        fil.dt,
-                        fil.fh,
-                        candidate.dm,
-                        downf,
-                        downt,
-                    )
+        ti = int(cuda.blockIdx.x)  # type: ignore
+        dmi = int(cuda.threadIdx.x)  # type: ignore
 
-                    fastdmt[  # type: ignore
-                        nt,
-                        ndms,
-                        stream,
-                    ](
-                        gpudmt,
-                        gpudata,
-                        nf,
-                        nt,
-                        fil.df,
-                        fil.dt,
-                        fil.fh,
-                        ddm,
-                        dmlow,
-                        downt,
-                    )
+        acc = 0.0
+        k1 = kdm * (dmlow + dmi * ddm) / dt
+        k2 = k1 * fh**-2
+        for fi in range(nf):
+            f = fh - fi * df
+            dbin = int(round(k1 * f**-2 - k2))
+            xti = ti + dbin
+            if xti >= nt:
+                xti -= nt
+            acc += ft[fi, xti]
+        cuda.atomic.add(dmt, (dmi, int(ti / tfact)), acc)  # type: ignore
 
-                    ntmid = int(ntdown / 2)
+    stream = cuda.stream()
 
-                    dedispersed = gpudd.copy_to_host(stream=stream)
-                    dedispersed = dedispersed[:, ntmid - 128 : ntmid + 128]
-                    dedispersed = normalise(dedispersed)
-                    candidate.dedispersed = Dedispersed(
-                        fl=fil.fl,
-                        fh=fil.fh,
-                        nt=256,
-                        nf=256,
-                        dm=candidate.dm,
-                        data=dedispersed,
-                        dt=fil.dt * downt,
-                        df=(fil.fh - fil.fl) / 256,
-                    )
+    with SIGPROCFilterbank(filterbank) as fil:
+        for candidate in track(
+            candidates,
+            disable=(not progressbar),
+            description=f"Featurizing from {filterbank}...",
+        ):
+            _, _, data = fil.chop(candidate)
+            nf, nt = data.shape
+            log.debug(f"Read in data with {nf} channels and {nt} samples.")
 
-                    dmtransform = gpudmt.copy_to_host(stream=stream)
-                    dmtransform = dmtransform[:, ntmid - 128 : ntmid + 128]
-                    dmtransform = normalise(dmtransform)
-                    candidate.dmtransform = DMTransform(
-                        nt=256,
-                        ddm=ddm,
-                        ndms=ndms,
-                        dmlow=dmlow,
-                        dmhigh=dmhigh,
-                        dm=candidate.dm,
-                        dt=fil.dt * downt,
-                        data=dmtransform,
-                    )
+            ndms = 256
+            dmlow, dmhigh = 0.0, 2 * candidate.dm
+            if zoom:
+                log.debug("Zoom-in feature active. Calculating DM range.")
+                ddm = delay2dm(fil.fl, fil.fh, fudging * candidate.wbin * fil.dt)
+                if ddm < candidate.dm:
+                    dmlow, dmhigh = candidate.dm - ddm, candidate.dm + ddm
+            ddm = (dmhigh - dmlow) / (ndms - 1)
+            log.debug(f"Using DM range: {dmlow} to {dmhigh} pc cm^-3.")
 
-                    if save:
-                        candidate.extras = {**fil.header}
-                        fname = "".join([str(candidate), ".h5"])
-                        candidate.save(fname)
+            ffact = int(fil.nf / 256)
+            tfact = 1 if candidate.wbin < 3 else int(candidate.wbin / 2)
+            log.debug(f"Downsample by {ffact} in frequency, {tfact} in time.")
+
+            nfdown = int(fil.nf / ffact)
+            ntdown = int(nt / tfact)
+
+            gpudata = cuda.to_device(data, stream=stream)
+            gpudd = cuda.device_array((nfdown, ntdown), order="C", stream=stream)
+            gpudmt = cuda.device_array((ndms, ntdown), order="C", stream=stream)
+
+            dedisperse[  # type: ignore
+                (int(fil.nf / 32), int(nt / 32)),
+                (32, 32),
+                stream,
+            ](
+                gpudd,
+                gpudata,
+                fil.nf,
+                nt,
+                fil.df,
+                fil.dt,
+                fil.fh,
+                candidate.dm,
+                ffact,
+                tfact,
+            )
+
+            fastdmt[  # type: ignore
+                nt,
+                ndms,
+                stream,
+            ](
+                gpudmt,
+                gpudata,
+                nf,
+                nt,
+                fil.df,
+                fil.dt,
+                fil.fh,
+                ddm,
+                dmlow,
+                tfact,
+            )
+
+            ntmid = int(ntdown / 2)
+
+            dedispersed = gpudd.copy_to_host(stream=stream)
+            dedispersed = dedispersed[:, ntmid - 128 : ntmid + 128]
+            dedispersed = normalise(dedispersed)
+            candidate.dedispersed = Dedispersed(
+                fl=fil.fl,
+                fh=fil.fh,
+                nt=256,
+                nf=256,
+                dm=candidate.dm,
+                data=dedispersed,
+                dt=fil.dt * tfact,
+                df=(fil.fh - fil.fl) / 256,
+            )
+
+            dmtransform = gpudmt.copy_to_host(stream=stream)
+            dmtransform = dmtransform[:, ntmid - 128 : ntmid + 128]
+            dmtransform = normalise(dmtransform)
+            candidate.dmtransform = DMTransform(
+                nt=256,
+                ddm=ddm,
+                ndms=ndms,
+                dmlow=dmlow,
+                dmhigh=dmhigh,
+                dm=candidate.dm,
+                dt=fil.dt * tfact,
+                data=dmtransform,
+            )
+
+            if save:
+                candidate.extras = {**fil.header}
+                fname = "".join([str(candidate), ".h5"])
+                candidate.save(fname)
+    ctx.reset()
     cuda.close()

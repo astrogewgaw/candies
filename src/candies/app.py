@@ -28,7 +28,6 @@ def make(
     save: bool = True,
     zoom: bool = True,
     fudging: int = 512,
-    verbose: bool = False,
     show_progress: bool = True,
 ):
     """
@@ -63,7 +62,6 @@ def make(
             zoom=zoom,
             gpuid=gpuid,
             fudging=fudging,
-            verbose=verbose,
             progressbar=show_progress,
         )
 
@@ -107,8 +105,8 @@ def store(
 def list_(
     candfiles: list[str | Path],
     /,
-    show: bool = False,
-    save: bool = True,
+    show: bool = True,
+    save: bool = False,
     saveto: str = "candidates.csv",
 ):
     """

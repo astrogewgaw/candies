@@ -63,7 +63,7 @@ class SIGPROCFilterbank:
 
         return self
 
-    def __exit__(self, *args) -> None:
+    def __exit__(self, *_) -> None:
         if self.fobject:
             self.fobject.close()
 
