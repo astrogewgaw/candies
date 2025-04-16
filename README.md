@@ -123,7 +123,7 @@ This command is useful is you just have a bunch of HDF5 files generated via [**`
 [issues]: https://github.com/astrogewgaw/candies/issues
 [interrogate]: https://github.com/econchick/interrogate
 [aa]: https://github.com/AstroAccelerateOrg/astro-accelerate
-[logo]: https://raw.githubusercontent.com/astrogewgaw/logos/main/rasters/candies.png
+[logo]: https://raw.githubusercontent.com/astrogewgaw/logos/main/candies/candies.png
 [dm-badge]: https://img.shields.io/pypi/dm/candies?style=for-the-badge
 [version-badge]: https://img.shields.io/pypi/v/candies?style=for-the-badge
 [wheel-badge]: https://img.shields.io/pypi/wheel/candies?style=for-the-badge
