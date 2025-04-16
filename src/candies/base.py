@@ -4,16 +4,15 @@ The base code for candies.
 
 import logging
 from pathlib import Path
-from functools import wraps
 from dataclasses import dataclass
 from collections.abc import MutableSequence
 
 import h5py as h5
+import matplotlib
 import numpy as np
 import pandas as pd
 import ultraplot as uplt
 from rich.logging import RichHandler
-
 
 logging.basicConfig(
     level="INFO",
@@ -22,28 +21,6 @@ logging.basicConfig(
     handlers=[RichHandler(rich_tracebacks=True)],
 )
 log = logging.getLogger("candies")
-
-
-def plotter(f):
-    @wraps(f)
-    def _(*args, **kwargs):
-        ax = kwargs.pop("ax", None)
-        show = kwargs.pop("show", True)
-        save = kwargs.pop("save", None)
-        if ax is None:
-            width = kwargs.get("width", 5.0)
-            height = kwargs.get("height", 5.0)
-            fig = uplt.figure(width=width, height=height)
-            ax = fig.subplot()
-            f(*args, ax=ax, **kwargs)
-            if save is not None:
-                fig.savefig(save)
-            if show:
-                uplt.show()
-        else:
-            f(*args, ax=ax, **kwargs)
-
-    return _
 
 
 class CandiesError(Exception):
@@ -139,9 +116,15 @@ class Dedispersed:
         """
         return self.data.sum(0)
 
-    @plotter
-    @plotter
-    def plot(self, ax: uplt.Axes | None = None, **kwargs):
+    def plot(
+        self,
+        /,
+        dpi: int = 96,
+        save: bool = True,
+        show: bool = False,
+        ax: uplt.Axes | None = None,
+        saveto: str | Path = "dedispersed.png",
+    ):
         """
         Plot a dedispersed dynamic spectrum.
 
@@ -153,39 +136,52 @@ class Dedispersed:
             Save the plot to a PNG file. True by default.
         show: bool, optional
             Show the plot in a separate window. False by default.
-        ax: pplt.Axes, optional
+        ax: uplt.Axes, optional
             The axis, in case we are plotting this as part of another plot. Default is None.
         saveto: str or Path
             Path where to save the plot. Default is "dedispersed.png" in the current working directory.
         """
 
-        assert ax is not None
+        def _plot(ax: uplt.Axes) -> None:
+            px = ax.panel_axes("top", width="5em", space=0)
+            px.plot(self.times, self.profile, lw=0.5, cycle="batlow")
+            px.set_yticks([])
 
-        px = ax.panel_axes("top", width="5em", space=0)
-        px.plot(self.times, self.profile, lw=0.5, cycle="batlow")
-        px.set_yticks([])
+            ax.format(xlabel=r"$\Delta t$ (in ms)", ylabel="Frequency (in MHz)")
 
-        flagged = np.all(self.data == self.data[0, :], axis=1)
-        X = self.data.copy()
-        X[flagged, :] = np.nan
+            flagged = np.all(self.data == self.data[0, :], axis=1)
+            X = self.data.copy()
+            X[flagged, :] = np.nan
 
-        ax.imshow(
-            X,
-            aspect="auto",
-            cmap="batlow",
-            interpolation="none",
-            extent=(
-                self.times[0],
-                self.times[-1],
-                self.freqs[-1],
-                self.freqs[0],
-            ),
-            vmin=float(np.nanmean(X) - 5 * np.nanstd(X)),
-            vmax=float(np.nanmean(X) + 5 * np.nanstd(X)),
-            **kwargs,
-        )
+            ax.imshow(
+                X,
+                aspect="auto",
+                cmap="batlow",
+                interpolation="none",
+                extent=(
+                    self.times[0],
+                    self.times[-1],
+                    self.freqs[-1],
+                    self.freqs[0],
+                ),
+                vmin=float(np.nanmean(X) - 5 * np.nanstd(X)),
+                vmax=float(np.nanmean(X) + 5 * np.nanstd(X)),
+            )
 
-        ax.format(xlabel=r"$\Delta t$ (in ms)", ylabel="Frequency (in MHz)")
+        if ax is None:
+            if not show:
+                matplotlib.use("agg")
+            fig = uplt.figure()
+            ax = fig.subplot()
+            assert ax is not None
+            _plot(ax)
+            if save:
+                fig.savefig(saveto, dpi=dpi)
+            if show:
+                uplt.show()
+            uplt.close(fig)
+        else:
+            _plot(ax)
 
     def save(self, fname: str | Path) -> None:
         """
@@ -294,8 +290,15 @@ class DMTransform:
         deltat = ntmid * self.dt * 1e3
         return np.linspace(-deltat, +deltat, self.nt)
 
-    @plotter
-    def plot(self, ax: uplt.Axes | None = None, **kwargs):
+    def plot(
+        self,
+        /,
+        dpi: int = 96,
+        save: bool = True,
+        show: bool = False,
+        ax: uplt.Axes | None = None,
+        saveto: str = "dmtransform.png",
+    ):
         """
         Plot a dedispersed dynamic spectrum.
 
@@ -307,28 +310,44 @@ class DMTransform:
             Save the plot to a PNG file. True by default.
         show: bool, optional
             Show the plot in a separate window. False by default.
-        ax: pplt.Axes, optional
+        ax: uplt.Axes, optional
             The axis, in case we are plotting this as part of another plot. Default is None.
         saveto: str or Path
             Path where to save the plot. Default is "dmtransform.png" in the current working directory.
         """
-        assert ax is not None
-        ax.imshow(
-            self.data,
-            aspect="auto",
-            cmap="batlow",
-            interpolation="none",
-            extent=(
-                self.times[0],
-                self.times[-1],
-                self.dms[-1],
-                self.dms[0],
-            ),
-            vmin=self.data.mean() - 5 * self.data.std(),
-            vmax=self.data.mean() + 5 * self.data.std(),
-            **kwargs,
-        )
-        ax.format(xlabel=r"$\Delta t$ (in ms)", ylabel=r"DM (in pc cm$^{-3}$)")
+
+        def _plot(ax: uplt.Axes):
+            ax.format(xlabel=r"$\Delta t$ (in ms)", ylabel=r"DM (in pc cm$^{-3}$)")
+
+            ax.imshow(
+                self.data,
+                aspect="auto",
+                cmap="batlow",
+                interpolation="none",
+                extent=(
+                    self.times[0],
+                    self.times[-1],
+                    self.dms[-1],
+                    self.dms[0],
+                ),
+                vmin=float(self.data.mean() - 5 * self.data.std()),
+                vmax=float(self.data.mean() + 5 * self.data.std()),
+            )
+
+        if ax is None:
+            if not show:
+                matplotlib.use("agg")
+            fig = uplt.figure()
+            ax = fig.subplot()
+            assert ax is not None
+            _plot(ax)
+            if save:
+                fig.savefig(saveto, dpi=dpi)
+            if show:
+                uplt.show()
+            uplt.close(fig)
+        else:
+            _plot(ax)
 
     def save(self, fname: str | Path) -> None:
         """
@@ -431,8 +450,14 @@ class Candidate:
         self.dedispersed = Dedispersed.load(fname)
         return self
 
-    @plotter
-    def plot(self, ax: uplt.Axes | None = None, **kwargs):
+    def plot(
+        self,
+        /,
+        dpi: int = 96,
+        save: bool = True,
+        show: bool = False,
+        saveto: str = "candidate.png",
+    ):
         """
         Plot a candy-date.
 
@@ -447,15 +472,16 @@ class Candidate:
         saveto: str or Path
             Path where to save the plot. Default is "candidate.png" in the current working directory.
         """
-        assert ax is not None
         if (self.dedispersed is not None) and (self.dmtransform is not None):
+            if not show:
+                matplotlib.use("agg")
             fig = uplt.figure(width=7.5, height=5, sharey=False)
             gs = uplt.GridSpec(nrows=2, ncols=3)
             axtab = fig.subplot(gs[:, -1])
             axtop = fig.subplot(gs[0, :-1])
             axbtm = fig.subplot(gs[1, :-1])
-            self.dedispersed.plot(ax=axtop, **kwargs)
-            self.dmtransform.plot(ax=axbtm, **kwargs)
+            self.dedispersed.plot(ax=axtop)
+            self.dmtransform.plot(ax=axbtm)
 
             labels = [
                 r"$t_{cand}$",
@@ -550,6 +576,12 @@ class Candidate:
                 cellLoc="center",
             )
             table.auto_set_font_size(False)
+
+            if save:
+                fig.savefig(saveto, dpi=dpi)
+            if show:
+                uplt.show()
+            uplt.close(fig)
 
     def save(self, fname: str | Path) -> None:
         """
