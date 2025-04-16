@@ -1,6 +1,55 @@
 [build-system]
 requires = ["wheel", "setuptools>=45", "setuptools_scm[toml]>=6.0"]
 
+[project]
+name = "candies"
+license = "MIT"
+readme = "README.md"
+dynamic = ["version"]
+requires-python = ">=3.10"
+license-files = ["LICENSE"]
+description = "Sweet, sweet candy-dates!"
+authors = [{name = "Ujjwal Panda", email = "ujjwalpanda97@gmail.com"}]
+
+classifiers = [
+  "Operating System :: Unix",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Astronomy",
+]
+
+dependencies = [
+  "numba",
+  "numpy",
+  "numba-cuda",
+
+  "rich",
+  "h5py",
+  "priwo",
+  "pandas",
+  "joblib",
+  "cyclopts",
+  "ultraplot",
+]
+
+[project.urls]
+Source = "https://github.com/astrogewgaw/candies"
+Homepage = "https://github.com/astrogewgaw/candies"
+Documentation = "https://github.com/astrogewgaw/candies"
+Issues = "https://github.com/astrogewgaw/candies/issues"
+
+[project.scripts]
+candies = "candies.app:app"
+
+[tool.setuptools]
+zip-safe = false
+include-package-data = true
+packages = {find = {where = ["src"]}}
+
 [tool.setuptools_scm]
 write_to = "src/candies/_version.py"
 
