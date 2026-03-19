@@ -13,8 +13,6 @@ authors = [{name = "Ujjwal Panda", email = "ujjwalpanda97@gmail.com"}]
 
 classifiers = [
   "Operating System :: Unix",
-  "Programming Language :: Python :: 3.8",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
@@ -23,17 +21,20 @@ classifiers = [
 ]
 
 dependencies = [
-  "numba",
   "numpy",
-  "numba-cuda",
-
+  "scipy",
+  "numba",
   "rich",
   "h5py",
   "priwo",
   "pandas",
-  "joblib",
+  "requests",
   "cyclopts",
-  "ultraplot",
+  "numba-cuda",
+  "onnxruntime",
+  "autoregistry",
+  "typing_extensions",
+  "optional_dependencies",
 ]
 
 [project.urls]
