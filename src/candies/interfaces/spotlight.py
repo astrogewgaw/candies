@@ -9,7 +9,6 @@ if OptDeps.SHAZAM.installed:
     from typing_extensions import Self
 
     from candies.base import Candy
-    from candies.functions import dm2delay
     from candies.interfaces.base import LiveInterface
 
     @dataclass
@@ -34,7 +33,7 @@ if OptDeps.SHAZAM.installed:
 
         def slice(self, candy: Candy) -> tuple[float, float, np.ndarray]:
             width = candy.wbin * self.dt
-            maxdelay = dm2delay(f=self.fl, f0=self.fh, dm=candy.dm)
+            maxdelay = 4.1488064239e3 * candy.dm * (self.fl**-2 - self.fh**-2)
             tbeg, tend = candy.t0 - maxdelay - width, candy.t0 + maxdelay + width
             return (
                 tbeg,

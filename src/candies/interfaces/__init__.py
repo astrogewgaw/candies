@@ -1,4 +1,4 @@
-from candies.base import OptionalDependencies
+from candies import OptDeps
 
 from candies.interfaces.gmrt import GMRTFile
 from candies.interfaces.sigproc import SIGPROCFile
@@ -12,7 +12,7 @@ __all__ = [
     "LiveInterface",
 ]
 
-if OptionalDependencies.SHAZAM.installed:
+if OptDeps.SHAZAM.installed:
     from candies.interfaces.spotlight import SPOTLIGHTLive
 
     _ = SPOTLIGHTLive

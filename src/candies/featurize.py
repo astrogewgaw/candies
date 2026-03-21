@@ -4,9 +4,9 @@ from multiprocessing.pool import Pool
 
 import numpy as np
 from numba import cuda
+from scipy.signal import detrend
 
 from candies.interfaces import Interface
-from candies.functions import K, znorm, delay2dm
 from candies.base import Candy, Candies, Dedispersed, DMTransform
 
 
@@ -20,132 +20,112 @@ class Featurizer:
         cuda.select_device(self.gpuid)
         stream = cuda.stream()
 
-        @cuda.jit
+        def znorm(X):
+            X = X.astype(np.float32)
+            X = np.nan_to_num(X)
+            X = detrend(X)
+            X = X - np.median(X)
+            X = X / np.std(X)
+            X = np.nan_to_num(X)
+            return X
+
+        @cuda.jit(fastmath=True)
         def crop(Y, X, stride):
+            nf = Y.shape[0]
+            nt = Y.shape[1]
             ii, jj = cuda.grid(2)  # type: ignore
-            nf, nt = Y.shape
             if (ii < nf) and (jj < nt):
                 Y[ii, jj] = X[ii, jj + stride]
 
-        @cuda.jit
-        def calcdd(Y, X, dm, fh, df, dt, td, fd):
+        @cuda.jit(fastmath=True)
+        def calcdd(Y, X, dm, shifts, td, fd):
+            nf = X.shape[0]
+            nt = X.shape[1]
             ii, jj = cuda.grid(2)  # type: ignore
-            nf, nt = X.shape
             if (ii < nf) and (jj < nt):
-                cuda.atomic.add(Y, (int(ii / fd), int(jj / td)), X[ii, (jj + int(round(K * dm / dt * ((fh - ii * df) ** -2 - fh**-2)))) % nt])  # type: ignore
+                iiy = ii // fd
+                jjy = jj // td
+                jjx = jj + int(shifts[ii] * dm + 0.5)
+                if jjx >= nt:
+                    jjx -= nt
+                cuda.atomic.add(Y, (iiy, jjy), X[ii, jjx])  # type: ignore
 
-        @cuda.jit
-        def calcdmt(Y, X, lodm, ddm, fh, df, dt, td):
+        @cuda.jit(fastmath=True)
+        def calcdmt(Y, X, dms, shifts, td):
+            nf = X.shape[0]
+            nt = X.shape[1]
+            ndms = Y.shape[0]
             ii, jj, kk = cuda.grid(3)  # type: ignore
-            nf, nt = X.shape
-            ndms, _ = Y.shape
             if (ii < nf) and (jj < nt) and (kk < ndms):
-                cuda.atomic.add(Y, (kk, int(jj / td)), X[ii, (jj + int(round(K * (lodm + kk * ddm) / dt * ((fh - ii * df) ** -2 - fh**-2)))) % nt])  # type: ignore
+                jjy = jj // td
+                jjx = jj + int(shifts[ii] * dms[kk] + 0.5)
+                if jjx >= nt:
+                    jjx -= nt
+                cuda.atomic.add(Y, (kk, jjy), X[ii, jjx])  # type: ignore
 
         tbeg, tend, data = self.interface.slice(candy)
 
         ndms = 256
         fudge = 64
         nf, nt = data.shape
+        fh = self.interface.fh
+        fl = self.interface.fl
+        nf = self.interface.nf
+        dt = self.interface.dt
         lodm, hidm = 0.0, 2.0 * candy.dm
         if self.zoom:
-            ddm = delay2dm(
-                self.interface.fl,
-                self.interface.fh,
-                fudge * candy.dm * self.interface.dt,
-            )
+            t = fudge * candy.dm * dt
+            ddm = t / (4.1488064239e3 * (fl**-2 - fh**-2))
             if ddm < candy.dm:
                 lodm, hidm = candy.dm - ddm, candy.dm + ddm
         ddm = (hidm - lodm) / (ndms - 1)
+        ff = np.linspace(fh, fl, nf, dtype=np.float32)
+        dms = np.linspace(lodm, hidm, ndms, dtype=np.float32)
+        perdmshifts = (4.1488064239e3 * (ff**-2 - fh**-2) / dt).astype(np.float32)
 
         td = 1 if candy.wbin < 3 else int(candy.wbin / 2)
         fd = int(nf / 256)
         nfred = int(nf / fd)
         ntred = int(nt / td)
 
-        DATADEVICE = cuda.to_device(data, stream=stream)
-        DDDEVICE = cuda.device_array(
-            (ndms, ntred),
-            order="C",
-            stream=stream,
-            dtype=np.float32,  # type: ignore
-        )
-        DMTDEVICE = cuda.device_array(
-            (nfred, ntred),
-            order="C",
-            stream=stream,
-            dtype=np.float32,  # type: ignore
-        )
-        DDCROPPED = cuda.device_array(
-            (256, 256),
-            order="C",
-            stream=stream,
-            dtype=np.float32,  # type: ignore
-        )
-        DMTCROPPED = cuda.device_array(
-            (256, 256),
-            order="C",
-            stream=stream,
-            dtype=np.float32,  # type: ignore
-        )
+        dmsdevice = cuda.to_device(dms, stream=stream)
+        datadevice = cuda.to_device(data, stream=stream)
+        shiftsdevice = cuda.to_device(perdmshifts, stream=stream)
+        ddcropped = cuda.device_array((256, 256), order="C", stream=stream, dtype=np.float32)  # type: ignore
+        dmtcropped = cuda.device_array((256, 256), order="C", stream=stream, dtype=np.float32)  # type: ignore
+        dddevice = cuda.device_array((nfred, ntred), order="C", stream=stream, dtype=np.float32)  # type: ignore
+        dmtdevice = cuda.device_array((ndms, ntred), order="C", stream=stream, dtype=np.float32)  # type: ignore
 
-        nthreads = 32
-        nblocksx = math.ceil(nf / nthreads)
-        nblocksy = math.ceil(nt / nthreads)
-        calcdd[(nblocksx, nblocksy), (nthreads, nthreads), stream](  # type: ignore
-            DDDEVICE,
-            DATADEVICE,
-            candy.dm,
-            self.interface.fh,
-            self.interface.df,
-            self.interface.dt,
-            td,
-            fd,
-        )
+        threads = (32, 32)
+        blocks = (math.ceil(nf / threads[0]), math.ceil(nt / threads[1]))
+        calcdd[blocks, threads, stream](dddevice, datadevice, candy.dm, shiftsdevice, td, fd)  # type: ignore
 
-        nthreads = 32
-        nblocksx = math.ceil(nfred / nthreads)
-        nblocksy = math.ceil(ntred / nthreads)
-        crop[(nblocksx, nblocksy), (nthreads, nthreads), stream](  # type: ignore
-            DDCROPPED,
-            DDDEVICE,
-            int(int(ntred / 2) - 128),
-        )
+        threads = (32, 32)
+        blocks = (math.ceil(nfred / threads[0]), math.ceil(ntred / threads[1]))
+        crop[blocks, threads, stream](ddcropped, dddevice, ntred // 2 - 128)  # type: ignore
 
         candy.dedispersed = Dedispersed(
             nt=256,
             nf=256,
+            fh=fh,
+            fl=fl,
+            dt=dt * td,
             dm=candy.dm,
-            fh=self.interface.fh,
-            fl=self.interface.fl,
-            dt=self.interface.dt * td,
-            df=(self.interface.fh - self.interface.fl) / 256,
-            data=znorm(DDCROPPED.copy_to_host(stream=stream)),  # type: ignore
+            df=(fh - fl) / 256,
+            data=znorm(ddcropped.copy_to_host(stream=stream)),  # type: ignore
         )
 
-        nthreads = 32
-        nblocksx = math.ceil(nf / 1)
-        nblocksy = math.ceil(nt / nthreads)
-        nblocksz = math.ceil(ndms / nthreads)
-        calcdmt[(nblocksx, nblocksy, nblocksz), (1, nthreads, nthreads), stream](  # type: ignore
-            DMTDEVICE,
-            DATADEVICE,
-            lodm,
-            ddm,
-            self.interface.fh,
-            self.interface.df,
-            self.interface.dt,
-            td,
+        threads = (1, 32, 32)
+        blocks = (
+            math.ceil(nf / threads[0]),
+            math.ceil(nt / threads[1]),
+            math.ceil(ndms / threads[2]),
         )
+        calcdmt[blocks, threads, stream](dmtdevice, datadevice, dmsdevice, shiftsdevice, td)  # type: ignore
 
-        nthreads = 32
-        nblocksx = math.ceil(ndms / nthreads)
-        nblocksy = math.ceil(ntred / nthreads)
-        crop[(nblocksx, nblocksy), (nthreads, nthreads), stream](  # type: ignore
-            DMTCROPPED,
-            DMTDEVICE,
-            int(int(ntred / 2) - 128),
-        )
+        threads = (32, 32)
+        blocks = (math.ceil(ndms / threads[0]), math.ceil(ntred / threads[1]))
+        crop[blocks, threads, stream](dmtcropped, dmtdevice, ntred // 2 - 128)  # type: ignore
 
         candy.dmtransform = DMTransform(
             nt=256,
@@ -153,9 +133,9 @@ class Featurizer:
             ndms=ndms,
             lodm=lodm,
             hidm=hidm,
+            dt=dt * td,
             dm=candy.dm,
-            dt=self.interface.dt * td,
-            data=znorm(DMTCROPPED.copy_to_host(stream=stream)),  # type: ignore
+            data=znorm(dmtcropped.copy_to_host(stream=stream)),  # type: ignore
         )
 
         candy.extras = self.interface.extras
