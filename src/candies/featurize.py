@@ -55,13 +55,18 @@ class Featurizer:
             nf = X.shape[0]
             nt = X.shape[1]
             ndms = Y.shape[0]
-            ii, jj, kk = cuda.grid(3)  # type: ignore
-            if (ii < nf) and (jj < nt) and (kk < ndms):
+            jj, kk = cuda.grid(2)  # type: ignore
+            if jj < nt and kk < ndms:
+                acc = 0.0
+                dm = dms[kk]
                 jjy = jj // td
-                jjx = jj + int(shifts[ii] * dms[kk] + 0.5)
-                if jjx >= nt:
-                    jjx -= nt
-                cuda.atomic.add(Y, (kk, jjy), X[ii, jjx])  # type: ignore
+                for ii in range(nf):
+                    shift = int(shifts[ii] * dm + 0.5)
+                    jjx = jj + shift
+                    if jjx >= nt:
+                        jjx -= nt
+                    acc += X[ii, jjx]
+                cuda.atomic.add(Y, (kk, jjy), acc)  # type: ignore
 
         tbeg, tend, data = self.interface.slice(candy)
 
@@ -115,12 +120,8 @@ class Featurizer:
             data=znorm(ddcropped.copy_to_host(stream=stream)),  # type: ignore
         )
 
-        threads = (1, 32, 32)
-        blocks = (
-            math.ceil(nf / threads[0]),
-            math.ceil(nt / threads[1]),
-            math.ceil(ndms / threads[2]),
-        )
+        threads = (32, 8)
+        blocks = (math.ceil(nt / threads[0]), math.ceil(ndms / threads[1]))
         calcdmt[blocks, threads, stream](dmtdevice, datadevice, dmsdevice, shiftsdevice, td)  # type: ignore
 
         threads = (32, 32)
