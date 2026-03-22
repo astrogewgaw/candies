@@ -38,30 +38,29 @@ class Featurizer:
                 Y[ii, jj] = X[ii, jj + stride]
 
         @cuda.jit(fastmath=True)
-        def calcdd(Y, X, dm, shifts, td, fd):
+        def calcdd(Y, X, shifts, td, fd):
             nf = X.shape[0]
             nt = X.shape[1]
             ii, jj = cuda.grid(2)  # type: ignore
             if (ii < nf) and (jj < nt):
                 iiy = ii // fd
                 jjy = jj // td
-                jjx = jj + int(shifts[ii] * dm + 0.5)
+                jjx = jj + shifts[ii]
                 if jjx >= nt:
                     jjx -= nt
                 cuda.atomic.add(Y, (iiy, jjy), X[ii, jjx])  # type: ignore
 
         @cuda.jit(fastmath=True)
-        def calcdmt(Y, X, dms, shifts, td):
+        def calcdmt(Y, X, shifts, td):
             nf = X.shape[0]
             nt = X.shape[1]
             ndms = Y.shape[0]
             jj, kk = cuda.grid(2)  # type: ignore
             if jj < nt and kk < ndms:
                 acc = 0.0
-                dm = dms[kk]
                 jjy = jj // td
                 for ii in range(nf):
-                    shift = int(shifts[ii] * dm + 0.5)
+                    shift = shifts[kk, ii]
                     jjx = jj + shift
                     if jjx >= nt:
                         jjx -= nt
@@ -88,14 +87,20 @@ class Featurizer:
         dms = np.linspace(lodm, hidm, ndms, dtype=np.float32)
         perdmshifts = (4.1488064239e3 * (ff**-2 - fh**-2) / dt).astype(np.float32)
 
+        allshifts = []
+        for dm in dms:
+            allshifts.append(dm * perdmshifts)
+        allshifts = np.asarray(allshifts).astype(np.int32)
+        shifts = np.asarray(candy.dm * perdmshifts).astype(np.int32)
+
         td = 1 if candy.wbin < 3 else int(candy.wbin / 2)
         fd = int(nf / 256)
         nfred = int(nf / fd)
         ntred = int(nt / td)
 
-        dmsdevice = cuda.to_device(dms, stream=stream)
         datadevice = cuda.to_device(data, stream=stream)
-        shiftsdevice = cuda.to_device(perdmshifts, stream=stream)
+        shiftsdevice = cuda.to_device(shifts, stream=stream)
+        allshiftsdevice = cuda.to_device(allshifts, stream=stream)
         ddcropped = cuda.device_array((256, 256), order="C", stream=stream, dtype=np.float32)  # type: ignore
         dmtcropped = cuda.device_array((256, 256), order="C", stream=stream, dtype=np.float32)  # type: ignore
         dddevice = cuda.device_array((nfred, ntred), order="C", stream=stream, dtype=np.float32)  # type: ignore
@@ -103,7 +108,7 @@ class Featurizer:
 
         threads = (32, 32)
         blocks = (math.ceil(nf / threads[0]), math.ceil(nt / threads[1]))
-        calcdd[blocks, threads, stream](dddevice, datadevice, candy.dm, shiftsdevice, td, fd)  # type: ignore
+        calcdd[blocks, threads, stream](dddevice, datadevice, shiftsdevice, td, fd)  # type: ignore
 
         threads = (32, 32)
         blocks = (math.ceil(nfred / threads[0]), math.ceil(ntred / threads[1]))
@@ -120,9 +125,9 @@ class Featurizer:
             data=znorm(ddcropped.copy_to_host(stream=stream)),  # type: ignore
         )
 
-        threads = (32, 8)
+        threads = (32, 32)
         blocks = (math.ceil(nt / threads[0]), math.ceil(ndms / threads[1]))
-        calcdmt[blocks, threads, stream](dmtdevice, datadevice, dmsdevice, shiftsdevice, td)  # type: ignore
+        calcdmt[blocks, threads, stream](dmtdevice, datadevice, allshiftsdevice, td)  # type: ignore
 
         threads = (32, 32)
         blocks = (math.ceil(ndms / threads[0]), math.ceil(ntred / threads[1]))
