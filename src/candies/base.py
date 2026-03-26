@@ -4,11 +4,13 @@ from autoregistry import Registry
 from dataclasses import field, dataclass
 from collections.abc import MutableSequence
 
+import pytz
 import h5py as h5
 import numpy as np
 import pandas as pd
 import ultraplot as uplt
 from rich.table import Table
+from astropy.time import Time
 from ultraplot.axes import Axes
 from rich.console import Console
 from typing_extensions import Self
@@ -354,6 +356,7 @@ class Slice:
                 origin="lower",
                 vmin=self.data.min(),
                 vmax=self.data.max(),
+                extent=(self.times[0], self.times[-1], self.freqs[-1], self.freqs[0]),
             )
             ax.colorbar(hm)
 
@@ -464,14 +467,16 @@ class Candy:
 
             cells = {}
             if len(hdr := self.extras) > 0:
-                cells["Source name"] = [str(hdr.get("source", "NA"))]
-                cells["Right ascension, RA (J2000)"] = [
-                    str(next((hdr[_] for _ in ["raj2000", "ra"] if _ in hdr), "NA"))
-                ]
-                cells["Declination, DEC (J2000)"] = [
-                    str(next((hdr[_] for _ in ["decj2000", "dec"] if _ in hdr), "NA"))
-                ]
+                src = str(hdr.get("source", "NA"))
+                ra = str(next((hdr[_] for _ in ["raj2000", "ra"] if _ in hdr), "NA"))
+                dec = str(next((hdr[_] for _ in ["decj2000", "dec"] if _ in hdr), "NA"))
+                cells["Source name"] = [src]
+                cells["Right ascension, RA (J2000)"] = [ra]
+                cells["Declination, DEC (J2000)"] = [dec]
             cells[r"$t_{cand}$"] = [f"{self.t0:.2f} s"]
+            if len(hdr := self.extras) > 0:
+                mjd = hdr.get("mjd", "NA")
+                cells["MJD"] = [f"{mjd:.9f}" if isinstance(mjd, float) else mjd]
             cells["DM"] = [f"{self.dm:.2f} pc cm$^{{-3}}$"]
             cells["SNR"] = [f"{self.snr:.2f}"]
             cells[r"$W_{bin}$"] = [f"{self.wbin:d} bins"]
@@ -524,6 +529,24 @@ class Candy:
                 cellText=list(cells.values()),
             )
             table.auto_set_font_size(False)
+
+            if len(hdr := self.extras) > 0:
+                titleparts = []
+                gtaccode = hdr.get("gtaccode", None)
+                if gtaccode is not None:
+                    titleparts.append(f"GTAC Code {gtaccode}")
+
+                mjd = hdr.get("mjd", None)
+                if mjd is not None:
+                    timestamp = (
+                        pytz.utc.localize(Time(mjd, format="mjd").to_datetime())  # type: ignore
+                        .astimezone(pytz.timezone("Asia/Kolkata"))
+                        .isoformat()
+                    )
+                    titleparts.append(f"{timestamp}")
+
+                if len(titleparts) > 0:
+                    fig.suptitle(" | ".join(titleparts))
 
             if show:
                 getattr(uplt, "show")()
