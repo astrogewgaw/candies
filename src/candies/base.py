@@ -89,6 +89,7 @@ class Dedispersed:
             hm = ax.imshow(
                 self.data,
                 cmap="magma",
+                aspect="auto",
                 origin="lower",
                 interpolation="none",
                 vmin=self.data.min(),
@@ -176,6 +177,7 @@ class DMTransform:
             hm = ax.imshow(
                 self.data,
                 cmap="magma",
+                aspect="auto",
                 origin="lower",
                 interpolation="none",
                 vmin=self.data.min(),
@@ -348,6 +350,7 @@ class Slice:
             hm = ax.imshow(
                 self.data,
                 cmap="magma",
+                aspect="auto",
                 origin="lower",
                 vmin=self.data.min(),
                 vmax=self.data.max(),
@@ -451,7 +454,7 @@ class Candy:
         **kwargs,
     ):
         if (self.dedispersed is not None) and (self.dmtransform is not None):
-            fig = getattr(uplt, "figure")(width=7.5, height=5)
+            fig = getattr(uplt, "figure")(width=7.5, height=5, sharey=False)
             gs = uplt.GridSpec(nrows=2, ncols=3)
             axtab = fig.subplot(gs[:, -1])
             axtop = fig.subplot(gs[0, :-1])
@@ -459,99 +462,66 @@ class Candy:
             self.dedispersed.plot(ax=axtop)
             self.dmtransform.plot(ax=axbtm)
 
-            labels = [
-                r"$t_{cand}$",
-                "DM",
-                "SNR",
-                r"$W_{bin}$",
-                r"$N_{t}$ (original)",
-                r"$N_{t}$ (downsampled)",
-                r"$N_{\nu}$ (downsampled)",
-                r"$\delta t$ (downsampled)",
-                r"$\delta \nu$ (downsampled)",
-                r"$\nu_{first}$",
-                r"$\nu_{last}$",
-                r"$N_{DM}$",
-                r"$\delta$DM",
-                r"$DM_{low}$",
-                r"$DM_{high}$",
-            ]
-
-            fields = [
-                [f"{self.t0:.2f} s"],
-                [f"{self.dm:.2f} pc cm$^{{-3}}$"],
-                [f"{self.snr:.2f}"],
-                [f"{self.wbin:d} bins"],
-                [
-                    f"{self.dedispersed.nt * (1 if self.wbin < 3 else int(self.wbin / 2)):d}"
-                ],
-                [f"{self.dedispersed.nt:d}"],
-                [f"{self.dedispersed.nf:d}"],
-                [rf"{self.dedispersed.dt * 1e6:.2f} $\mu$s"],
-                [f"{self.dedispersed.df * 1e3:.2f} kHz"],
-                [f"{self.dedispersed.fh:.2f} MHz"],
-                [f"{self.dedispersed.fl:.2f} MHz"],
-                [f"{self.dmtransform.ndms:d}"],
-                [f"{self.dmtransform.ddm:.2f} pc cm$^{{-3}}$"],
-                [f"{self.dmtransform.lodm:.2f} pc cm$^{{-3}}$"],
-                [f"{self.dmtransform.hidm:.2f} pc cm$^{{-3}}$"],
-            ]
-
+            cells = {}
             if len(hdr := self.extras) > 0:
-
-                labels.insert(5, r"$N_{\nu}$ (original)")
-                labels.insert(7, r"$\delta t$ (original)")
-                labels.insert(9, r"$\delta \nu$ (original)")
-
+                cells["Source name"] = [str(hdr.get("source", "NA"))]
+                cells["Right ascension, RA (J2000)"] = [
+                    str(next((hdr[_] for _ in ["raj2000", "ra"] if _ in hdr), "NA"))
+                ]
+                cells["Declination, DEC (J2000)"] = [
+                    str(next((hdr[_] for _ in ["decj2000", "dec"] if _ in hdr), "NA"))
+                ]
+            cells[r"$t_{cand}$"] = [f"{self.t0:.2f} s"]
+            cells["DM"] = [f"{self.dm:.2f} pc cm$^{{-3}}$"]
+            cells["SNR"] = [f"{self.snr:.2f}"]
+            cells[r"$W_{bin}$"] = [f"{self.wbin:d} bins"]
+            cells[r"$N_{t}$ (original)"] = [
+                f"{self.dedispersed.nt * (1 if self.wbin < 3 else int(self.wbin / 2)):d}"
+            ]
+            cells[r"$N_{t}$ (downsampled)"] = [f"{self.dedispersed.nt:d}"]
+            if len(hdr := self.extras) > 0:
                 nforig = next((hdr[_] for _ in ["nf", "nchans"] if _ in hdr), "NA")
-                fields.insert(5, [f"{nforig:d}" if isinstance(nforig, int) else nforig])
-
+                cells[r"$N_{\nu}$ (original)"] = [
+                    f"{nforig:d}" if isinstance(nforig, int) else nforig
+                ]
+            cells[r"$N_{\nu}$ (downsampled)"] = [f"{self.dedispersed.nf:d}"]
+            if len(hdr := self.extras) > 0:
                 dtorig = next((hdr[_] for _ in ["dt", "tsamp"] if _ in hdr), "NA")
-                fields.insert(
-                    7,
-                    [
-                        (
-                            rf"{dtorig * 1e6:.2f} $\mu$s"
-                            if isinstance(dtorig, float)
-                            else dtorig
-                        )
-                    ],
-                )
-
+                cells[r"$\delta t$ (original)"] = [
+                    (
+                        rf"{dtorig * 1e6:.2f} $\mu$s"
+                        if isinstance(dtorig, float)
+                        else dtorig
+                    )
+                ]
+            cells[r"$\delta t$ (downsampled)"] = [
+                rf"{self.dedispersed.dt * 1e6:.2f} $\mu$s"
+            ]
+            if len(hdr := self.extras) > 0:
                 dforig = next(
                     (hdr[_] for _ in ["df", "foff", "chanwidth"] if _ in hdr),
                     "NA",
                 )
-                fields.insert(
-                    9,
-                    [
-                        (
-                            f"{dforig * 1e3:.2f} kHz"
-                            if isinstance(dforig, float)
-                            else dforig
-                        )
-                    ],
-                )
-
-                labels.insert(0, "Source name")
-                labels.insert(2, "Declination, DEC (J2000)")
-                labels.insert(1, "Right ascension, RA (J2000)")
-
-                name = hdr.get("source", "NA")
-                ra = next((hdr[_] for _ in ["raj2000", "ra"] if _ in hdr), "NA")
-                dec = next((hdr[_] for _ in ["decj2000", "dec"] if _ in hdr), "NA")
-
-                fields.insert(1, [f"{ra:s}"])
-                fields.insert(2, [f"{dec:s}"])
-                fields.insert(0, [f"{name:s}"])
+                cells[r"$\delta \nu$ (original)"] = [
+                    f"{dforig * 1e3:.2f} kHz" if isinstance(dforig, float) else dforig
+                ]
+            cells[r"$\delta \nu$ (downsampled)"] = [
+                f"{self.dedispersed.df * 1e3:.2f} kHz"
+            ]
+            cells[r"$\nu_{first}$"] = [f"{self.dedispersed.fh:.2f} MHz"]
+            cells[r"$\nu_{last}$"] = [f"{self.dedispersed.fl:.2f} MHz"]
+            cells[r"$N_{DM}$"] = [f"{self.dmtransform.ndms:d}"]
+            cells[r"$\delta$DM"] = [f"{self.dmtransform.ddm:.2f} pc cm$^{{-3}}$"]
+            cells[r"$DM_{low}$"] = [f"{self.dmtransform.lodm:.2f} pc cm$^{{-3}}$"]
+            cells[r"$DM_{high}$"] = [f"{self.dmtransform.hidm:.2f} pc cm$^{{-3}}$"]
 
             axtab.axis("off")
             table = axtab.table(
                 loc="center",
                 edges="closed",
-                cellText=fields,
-                rowLabels=labels,
                 cellLoc="center",
+                rowLabels=list(cells.keys()),
+                cellText=list(cells.values()),
             )
             table.auto_set_font_size(False)
 
