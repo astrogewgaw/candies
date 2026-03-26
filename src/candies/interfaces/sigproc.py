@@ -1,12 +1,13 @@
 import mmap
-import numpy as np
 from pathlib import Path
 from dataclasses import dataclass
 
+import numpy as np
 from priwo import readhdr
+import astropy.units as uzi
 from typing_extensions import Self
 
-from candies.base import Candy
+from candies.base import Candy, Slice
 from candies.interfaces.base import FileInterface
 
 
@@ -36,6 +37,29 @@ class SIGPROCFile(FileInterface):
             bw = nf * df
             fh = fl + bw - (0.5 * df)
 
+        hdr["datafile"] = str(fn)
+
+        if (src := hdr.get("source_name", None)) is not None:
+            hdr["source"] = src
+
+        if (mjd := hdr.get("tstart", None)) is not None:
+            hdr["mjd"] = mjd
+
+        if (ra := hdr.get("src_raj", None)) is not None:
+            hdr["ra"] = hdr["raj2000"] = (
+                f"{(hh := int(ra // 10000)):02d}h"
+                f"{(mm := int((ra - hh * 10000) // 100)):02d}m"
+                f"{(ra - hh * 10000 - mm * 100):05.2f}s"
+            )
+
+        if (dec := hdr.get("src_dej", None)) is not None:
+            hdr["dec"] = hdr["decj2000"] = (
+                f"{'-' if dec < 0 else ''}"
+                f"{(dd := int(abs(dec) // 10000)):02d}d"
+                f"{(mm := int((abs(dec) - dd * 10000) // 100)):02d}m"
+                f"{(abs(dec) - dd * 10000 - mm * 100):05.2f}s"
+            )
+
         return cls(
             fn=fn,
             nf=nf,
@@ -48,7 +72,7 @@ class SIGPROCFile(FileInterface):
             nskip=nskip,
         )
 
-    def slice(self, candy: Candy) -> tuple[float, float, np.ndarray]:
+    def slice(self, candy: Candy) -> Slice:
         width = candy.wbin * self.dt
         maxdelay = 4.1488064239e3 * candy.dm * (self.fl**-2 - self.fh**-2)
         tbeg, tend = candy.t0 - maxdelay - width, candy.t0 + maxdelay + width
@@ -141,7 +165,27 @@ class SIGPROCFile(FileInterface):
                 medians = np.median(tempdata, axis=1)
                 data = np.ones_like(tempdata, shape=(self.nf, NR)) * medians[:, None]
                 data[:, : self.nt - N0] = tempdata
-            # Calculate the correct reference beginning and end times.
+            nf, nt = data.shape
             tbeg = N0 * self.dt
             tend = tbeg + (NR * self.dt)
-        return tbeg, tend, data
+
+        hdr = self.extras
+        if (mjd := hdr.get("mjd", None)) is not None:
+            hdr["begmjd"] = mjd + (tbeg * getattr(uzi, "s")).to("days").value
+            hdr["endmjd"] = mjd + (tend * getattr(uzi, "s")).to("days").value
+            hdr["mjd"] = mjd + (candy.t0 * getattr(uzi, "s")).to("days").value
+
+        return Slice(
+            nf=nf,
+            nt=nt,
+            tbeg=tbeg,
+            tend=tend,
+            extras=hdr,
+            fh=self.fh,
+            fl=self.fl,
+            df=self.df,
+            dt=self.dt,
+            nbits=self.nbits,
+            fn=Path(f"{candy.id}.h5"),
+            data=np.ascontiguousarray(data),
+        )

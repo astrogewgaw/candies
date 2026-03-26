@@ -1,8 +1,7 @@
 import os
 import hashlib
 from pathlib import Path
-from typing import Literal
-from typing_extensions import Generator
+from typing import Literal, Generator
 
 import requests
 import numpy as np

@@ -1,0 +1,33 @@
+import sys
+import orjson
+import logging
+import structlog
+
+shared_processors = [
+    structlog.processors.add_log_level,
+    structlog.contextvars.merge_contextvars,
+    structlog.processors.TimeStamper(fmt="iso", utc=True),
+]
+
+if sys.stderr.isatty():
+    processors = shared_processors + [structlog.dev.ConsoleRenderer()]
+else:
+    processors = shared_processors + [
+        structlog.processors.format_exc_info,
+        structlog.processors.dict_tracebacks,
+        structlog.processors.JSONRenderer(serializer=orjson.dumps),
+    ]
+
+if not structlog.is_configured():
+    structlog.contextvars.clear_contextvars()
+    structlog.configure(
+        processors=processors,
+        cache_logger_on_first_use=True,
+        wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
+        logger_factory=(
+            structlog.BytesLoggerFactory()
+            if not sys.stderr.isatty()
+            else structlog.PrintLoggerFactory(sys.stdout)
+        ),
+    )
+log = structlog.get_logger()

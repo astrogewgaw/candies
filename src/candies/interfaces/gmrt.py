@@ -4,9 +4,10 @@ from pathlib import Path
 from dataclasses import dataclass
 
 import numpy as np
+import astropy.units as uzi
 from typing_extensions import Self
 
-from candies.base import Candy
+from candies.base import Candy, Slice
 from candies.interfaces.base import FileInterface
 
 
@@ -61,8 +62,8 @@ class GMRTFile(FileInterface):
         ra, dec = hdr["coords"].split(",")
         rah, ram, ras = ra.strip().split(":")
         decd, decm, decs = dec.strip().split(":")
-        hdr["ra"] = f"{rah}h{ram}m{ras}s"
-        hdr["dec"] = f"{decd}d{decm}m{decs}s"
+        ra = hdr["ra"] = hdr["raj2000"] = f"{rah}h{ram}m{ras}s"
+        dec = hdr["dec"] = hdr["decj2000"] = f"{decd}d{decm}m{decs}s"
         hdr["coords"] = f"{ra} {dec}"
 
         if hdr["df"] < 0:
@@ -75,6 +76,7 @@ class GMRTFile(FileInterface):
             hdr["bw"] = hdr["nf"] * hdr["df"]
             hdr["fh"] = hdr["fl"] + hdr["bw"] - (0.5 * hdr["df"])
 
+        hdr["datafile"] = str(fn)
         return cls(
             fn=fn,
             extras=hdr,
@@ -86,7 +88,7 @@ class GMRTFile(FileInterface):
             nbits=hdr["nbits"],
         )
 
-    def slice(self, candy: Candy) -> tuple[float, float, np.ndarray]:
+    def slice(self, candy: Candy) -> Slice:
         width = candy.wbin * self.dt
         maxdelay = 4.1488064239e3 * candy.dm * (self.fl**-2 - self.fh**-2)
         tbeg, tend = candy.t0 - maxdelay - width, candy.t0 + maxdelay + width
@@ -179,7 +181,27 @@ class GMRTFile(FileInterface):
                 medians = np.median(tempdata, axis=1)
                 data = np.ones_like(tempdata, shape=(self.nf, NR)) * medians[:, None]
                 data[:, : self.nt - N0] = tempdata
-            # Calculate the correct reference beginning and end times.
+            nf, nt = data.shape
             tbeg = N0 * self.dt
             tend = tbeg + (NR * self.dt)
-        return tbeg, tend, data
+
+        hdr = self.extras
+        if (mjd := hdr.get("mjd", None)) is not None:
+            hdr["begmjd"] = mjd + (tbeg * getattr(uzi, "s")).to("days").value
+            hdr["endmjd"] = mjd + (tend * getattr(uzi, "s")).to("days").value
+            hdr["mjd"] = mjd + (candy.t0 * getattr(uzi, "s")).to("days").value
+
+        return Slice(
+            nf=nf,
+            nt=nt,
+            tbeg=tbeg,
+            tend=tend,
+            extras=hdr,
+            fh=self.fh,
+            fl=self.fl,
+            df=self.df,
+            dt=self.dt,
+            nbits=self.nbits,
+            fn=Path(f"{candy.id}.h5"),
+            data=np.ascontiguousarray(data),
+        )

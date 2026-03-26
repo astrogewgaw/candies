@@ -13,8 +13,10 @@ from candies.base import Candy, Candies, Dedispersed, DMTransform
 @dataclass
 class Featurizer:
     interface: Interface
-    zoom: bool = True
+
     gpuid: int = 0
+    zoom: bool = True
+    snratio: float = 0.1
 
     def __call__(self, candy: Candy) -> Candy:
         cuda.select_device(self.gpuid)
@@ -29,7 +31,7 @@ class Featurizer:
             X = np.nan_to_num(X)
             return X
 
-        @cuda.jit(fastmath=True)
+        @cuda.jit(cache=True, fastmath=True)
         def crop(Y, X, stride):
             nf = Y.shape[0]
             nt = Y.shape[1]
@@ -37,7 +39,7 @@ class Featurizer:
             if (ii < nf) and (jj < nt):
                 Y[ii, jj] = X[ii, jj + stride]
 
-        @cuda.jit(fastmath=True)
+        @cuda.jit(cache=True, fastmath=True)
         def calcdd(Y, X, shifts, td, fd):
             nf = X.shape[0]
             nt = X.shape[1]
@@ -50,7 +52,7 @@ class Featurizer:
                     jjx -= nt
                 cuda.atomic.add(Y, (iiy, jjy), X[ii, jjx])  # type: ignore
 
-        @cuda.jit(fastmath=True)
+        @cuda.jit(cache=True, fastmath=True)
         def calcdmt(Y, X, shifts, td):
             nf = X.shape[0]
             nt = X.shape[1]
@@ -67,39 +69,40 @@ class Featurizer:
                     acc += X[ii, jjx]
                 cuda.atomic.add(Y, (kk, jjy), acc)  # type: ignore
 
-        tbeg, tend, data = self.interface.slice(candy)
+        sliced = self.interface.slice(candy)
+        nf, nt = sliced.data.shape
 
         ndms = 256
-        fudge = 64
-        nf, nt = data.shape
         fh = self.interface.fh
         fl = self.interface.fl
         nf = self.interface.nf
+        bw = self.interface.bw
         dt = self.interface.dt
         lodm, hidm = 0.0, 2.0 * candy.dm
         if self.zoom:
-            t = fudge * candy.dm * dt
-            ddm = t / (4.1488064239e3 * (fl**-2 - fh**-2))
-            if ddm < candy.dm:
+            fc = 0.5 * (fh + fl)
+            if (
+                ddm := np.sqrt(np.pi)
+                * fc**3
+                * (candy.wbin * dt)
+                / (1382 * self.snratio * bw)
+            ) < candy.dm:
                 lodm, hidm = candy.dm - ddm, candy.dm + ddm
         ddm = (hidm - lodm) / (ndms - 1)
         ff = np.linspace(fh, fl, nf, dtype=np.float32)
         dms = np.linspace(lodm, hidm, ndms, dtype=np.float32)
         perdmshifts = (4.1488064239e3 * (ff**-2 - fh**-2) / dt).astype(np.float32)
 
-        allshifts = []
-        for dm in dms:
-            allshifts.append(dm * perdmshifts)
-        allshifts = np.asarray(allshifts).astype(np.int32)
-        shifts = np.asarray(candy.dm * perdmshifts).astype(np.int32)
+        shifts = (candy.dm * perdmshifts).astype(np.int32)
+        allshifts = (dms[:, None] * perdmshifts[None, :]).astype(np.int32)
 
         td = 1 if candy.wbin < 3 else int(candy.wbin / 2)
         fd = int(nf / 256)
         nfred = int(nf / fd)
         ntred = int(nt / td)
 
-        datadevice = cuda.to_device(data, stream=stream)
         shiftsdevice = cuda.to_device(shifts, stream=stream)
+        datadevice = cuda.to_device(sliced.data, stream=stream)
         allshiftsdevice = cuda.to_device(allshifts, stream=stream)
         ddcropped = cuda.device_array((256, 256), order="C", stream=stream, dtype=np.float32)  # type: ignore
         dmtcropped = cuda.device_array((256, 256), order="C", stream=stream, dtype=np.float32)  # type: ignore
@@ -144,9 +147,9 @@ class Featurizer:
             data=znorm(dmtcropped.copy_to_host(stream=stream)),  # type: ignore
         )
 
-        candy.extras = self.interface.extras
-        candy.extras["tbeg"] = tbeg
-        candy.extras["tend"] = tend
+        candy.extras["tbeg"] = sliced.tbeg
+        candy.extras["tend"] = sliced.tend
+        candy.extras = {**candy.extras, **sliced.extras}
 
         cuda.close()
         return candy
@@ -158,8 +161,19 @@ def featurize(
     njobs: int = 1,
     gpuid: int = 0,
     zoom: bool = True,
+    snratio: float = 0.1,
 ) -> Candies:
-    featurizer = Featurizer(zoom=zoom, gpuid=gpuid, interface=interface)
     with Pool(processes=njobs) as pool:
-        candies = Candies(pool.map(featurizer, candies, chunksize=1))
+        candies = Candies(
+            pool.map(
+                Featurizer(
+                    zoom=zoom,
+                    gpuid=gpuid,
+                    snratio=snratio,
+                    interface=interface,
+                ),
+                candies,
+                chunksize=1,
+            )
+        )
     return candies

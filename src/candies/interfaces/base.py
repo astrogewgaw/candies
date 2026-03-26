@@ -2,11 +2,10 @@ from pathlib import Path
 from abc import abstractmethod
 from dataclasses import dataclass
 
-import numpy as np
 from autoregistry import Registry
 from typing_extensions import Self
 
-from candies.base import Candy
+from candies.base import Slice, Candy
 
 
 @dataclass
@@ -29,7 +28,7 @@ class Interface(Registry, recursive=False, suffix="Interface"):
         return self.fh - self.bw + (0.5 * self.df)
 
     @abstractmethod
-    def slice(self, candy: Candy) -> tuple[float, float, np.ndarray]:
+    def slice(self, candy: Candy) -> Slice:
         pass
 
 
@@ -51,3 +50,6 @@ class LiveInterface(Interface, suffix="Live"):
     @abstractmethod
     def load(cls) -> Self:
         pass
+
+
+__all__ = ["Interface", "FileInterface", "LiveInterface"]
