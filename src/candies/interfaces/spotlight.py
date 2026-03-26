@@ -57,9 +57,9 @@ if OptDeps.SHAZAM.installed:
             nf, nt = data.shape
 
             hdr = self.extras
-            hdr["begmjd"] = hdr["mjd"] + (tbeg * getattr(uzi, "s")).to("days").value
-            hdr["endmjd"] = hdr["mjd"] + (tend * getattr(uzi, "s")).to("days").value
-            hdr["mjd"] = hdr["mjd"] + (candy.t0 * getattr(uzi, "s")).to("days").value
+            hdr["begmjd"] = hdr["mjd"] + (tbeg * getattr(uzi, "s")).to("day").value
+            hdr["endmjd"] = hdr["mjd"] + (tend * getattr(uzi, "s")).to("day").value
+            hdr["mjd"] = hdr["mjd"] + (candy.t0 * getattr(uzi, "s")).to("day").value
 
             radians = getattr(uzi, "rad")
             ra = self.ring.beamras[candy.beam]

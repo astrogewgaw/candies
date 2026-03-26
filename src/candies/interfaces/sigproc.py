@@ -171,9 +171,9 @@ class SIGPROCFile(FileInterface):
 
         hdr = self.extras
         if (mjd := hdr.get("mjd", None)) is not None:
-            hdr["begmjd"] = mjd + (tbeg * getattr(uzi, "s")).to("days").value
-            hdr["endmjd"] = mjd + (tend * getattr(uzi, "s")).to("days").value
-            hdr["mjd"] = mjd + (candy.t0 * getattr(uzi, "s")).to("days").value
+            hdr["begmjd"] = mjd + (tbeg * getattr(uzi, "s")).to("day").value
+            hdr["endmjd"] = mjd + (tend * getattr(uzi, "s")).to("day").value
+            hdr["mjd"] = mjd + (candy.t0 * getattr(uzi, "s")).to("day").value
 
         return Slice(
             nf=nf,
