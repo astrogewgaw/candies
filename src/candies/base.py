@@ -561,6 +561,20 @@ readers = Registry(prefix="read")
 
 
 @readers
+def readpandas(df: pd.DataFrame) -> list[Candy]:
+    return [
+        Candy(
+            dm=float(row["dm"]),
+            t0=float(row["t0"]),
+            snr=float(row["snr"]),
+            wbin=int(row["wbin"]),
+            extras={"datafile": str(fn)} if not pd.isnull(fn := row["fn"]) else {},  # type: ignore
+        )
+        for _, row in df.iterrows()
+    ]
+
+
+@readers
 def readyour(fn: str | Path) -> list[Candy]:
     return [
         Candy(
@@ -568,7 +582,7 @@ def readyour(fn: str | Path) -> list[Candy]:
             snr=float(row["snr"]),
             t0=float(row["stime"]),
             wbin=int(row["width"]),
-            extras={"datafile": str(row["file"])},
+            extras={"datafile": str(fn)} if not pd.isnull(fn := row["file"]) else {},  # type: ignore
         )
         for _, row in pd.read_csv(fn).iterrows()
     ]
@@ -642,12 +656,35 @@ def readtransientx(fn: str | Path) -> list[Candy]:
         raise CandiesError("DATAFILE NOT FOUND. ABORT.")
 
 
+@readers
+def readh5(fn: list[str | Path]) -> list[Candy]:
+    return [Candy.load(_) for _ in fn]
+
+
 writers = Registry(prefix="write")
 
 
 @writers
-def writeyour(items: list[Candy], fn: str | Path) -> None:
+def writepandas(items: list[Candy]) -> pd.DataFrame:
     return pd.DataFrame(
+        [
+            (
+                {
+                    "dm": item.dm,
+                    "t0": item.t0,
+                    "snr": item.snr,
+                    "wbin": item.wbin,
+                    "fn": item.extras.get("datafile", pd.NA),
+                }
+            )
+            for item in items
+        ]
+    )
+
+
+@writers
+def writeyour(items: list[Candy], fn: str | Path) -> None:
+    pd.DataFrame(
         [
             (
                 {
@@ -692,9 +729,13 @@ class Candies(MutableSequence):
     def insert(self, index, value: Candy):
         self.items.insert(index, value)
 
+    @property
+    def pandas(self) -> pd.DataFrame:
+        return writers["pandas"](self.items)
+
     @classmethod
-    def load(cls, fn: str | Path | list) -> Self:
-        if isinstance(fn, str | Path):
+    def load(cls, x) -> Self:
+        if isinstance(x, str | Path):
             return cls(
                 items=readers[
                     (
@@ -703,29 +744,36 @@ class Candies(MutableSequence):
                             ".dat": "astroacc",
                             ".json": "transientx",
                             ".singlepulse": "presto",
-                        }[Path(fn).suffix]
+                        }[Path(x).suffix]
                     )
-                ](fn)
+                ](x)
             )
-        elif isinstance(fn, list):
-            if isinstance(fn[0], str | Path):
-                return cls(items=[Candy.load(_) for _ in fn])
-        raise CandiesError(f"INVALID FILEPATH: {fn}. ABORT.")
+        elif isinstance(x, list):
+            if all(isinstance(_, str | Path) for _ in x):
+                return cls(items=readers["h5"](x))
+        elif isinstance(x, pd.DataFrame):
+            return cls(items=readers["pandas"](x))
+        raise CandiesError("INVALID INPUT FORMAT. ABORT.")
 
-    def save(self, fn: str | Path | None = None) -> None:
-        return writers[
-            (
-                {
-                    ".h5": "h5",
-                    ".csv": "your",
-                    ".dat": "astroacc",
-                    ".json": "transientx",
-                    ".singlepulse": "presto",
-                }[Path(fn).suffix]
-                if fn is not None
-                else "h5"
-            )
-        ](self.items, fn)
+    def save(self, x) -> None:
+        if isinstance(x, str | Path):
+            writers[
+                (
+                    {
+                        ".h5": "h5",
+                        ".csv": "your",
+                        ".dat": "astroacc",
+                        ".json": "transientx",
+                        ".singlepulse": "presto",
+                    }[Path(x).suffix]
+                )
+            ](self.items, x)
+        elif isinstance(x, list):
+            if all(isinstance(_, str | Path) for _ in x):
+                writers["h5"](self.items, x)
+        elif x is None:
+            writers["h5"](self.items)
+        raise CandiesError("INVALID OUTPUT FORMAT. ABORT.")
 
     def show(self):
         console = Console()

@@ -4,13 +4,13 @@ from functools import partial
 
 import cyclopts
 import matplotlib
+import pandas as pd
 from rich.progress import track
 
-from candies.logging import log
-from candies.base import Candies
 from candies.classify import classify
 from candies.featurize import featurize
 from candies.interfaces import Interface
+from candies.base import Candies, CandiesError
 
 app = cyclopts.App()
 app["--help"].group = "Admin"
@@ -40,21 +40,25 @@ def make(
     interface: Literal["splt", "gmrt", "sigproc", "spotlight"] = "sigproc",
 ):
     candies = Candies.load(candidates)
-    if (x := Interface["file"].get(interface)) is not None:
-        if datafile is None:
-            try:
-                datafile = candies[0].extras["datafile"]
-            except KeyError:
-                log.error("NO DATAFILE. ABORT.")
-                exit()
-        maker = partial(featurize, interface=x.load(fn=datafile))
-    elif (x := Interface["live"].get(interface)) is not None:
-        maker = partial(featurize, interface=x.load())
-    else:
-        log.error("INVALID INTERFACE. ABORT.")
-        exit()
-    candies = maker(zoom=zoom, njobs=njobs, gpuid=gpuid, candies=candies)
-    for candy in track(candies, description="Saving...", transient=True):
+
+    df = candies.pandas
+    if datafile is not None:
+        df = df.replace({pd.NA: str(datafile)})
+    groups = df.groupby("fn")
+
+    made = []
+    for fn, group in groups:
+        minis = Candies.load(group)
+        if (x := Interface["file"].get(interface)) is not None:
+            maker = partial(featurize, interface=x.load(fn=fn))
+        elif (x := Interface["live"].get(interface)) is not None:
+            maker = partial(featurize, interface=x.load())
+        else:
+            raise CandiesError("INVALID INTERFACE. ABORT.")
+        minis = maker(zoom=zoom, njobs=njobs, gpuid=gpuid, candies=minis)
+        made.extend(minis)
+
+    for candy in track(Candies(items=made), description="Saving...", transient=True):
         candy.save()
 
 
@@ -83,22 +87,26 @@ def wrap(
     model: Literal["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"] = "a",
 ):
     candies = Candies.load(candidates)
-    if (x := Interface["file"].get(interface)) is not None:
-        if datafile is None:
-            try:
-                datafile = candies[0].extras["datafile"]
-            except KeyError:
-                log.error("NO DATAFILE. ABORT.")
-                exit()
-        maker = partial(featurize, interface=x.load(fn=datafile))
-    elif (x := Interface["live"].get(interface)) is not None:
-        maker = partial(featurize, interface=x.load())
-    else:
-        log.error("INVALID INTERFACE. ABORT.")
-        exit()
-    candies = maker(zoom=zoom, njobs=njobs, gpuid=gpuid, candies=candies)
-    candies = classify(gpuid=gpuid, modelid=model, batchsize=batchsize, candies=candies)
-    for candy in track(candies, description="Saving...", transient=True):
+
+    df = candies.pandas
+    if datafile is not None:
+        df = df.replace({pd.NA: str(datafile)})
+    groups = df.groupby("fn")
+
+    wrapped = []
+    for fn, group in groups:
+        minis = Candies.load(group)
+        if (x := Interface["file"].get(interface)) is not None:
+            maker = partial(featurize, interface=x.load(fn=fn))
+        elif (x := Interface["live"].get(interface)) is not None:
+            maker = partial(featurize, interface=x.load())
+        else:
+            raise CandiesError("INVALID INTERFACE. ABORT.")
+        minis = maker(zoom=zoom, njobs=njobs, gpuid=gpuid, candies=minis)
+        minis = classify(gpuid=gpuid, modelid=model, batchsize=batchsize, candies=minis)
+        wrapped.extend(minis)
+
+    for candy in track(Candies(items=wrapped), description="Saving...", transient=True):
         candy.save()
 
 
@@ -110,21 +118,22 @@ def store(
     interface: Literal["splt", "gmrt", "sigproc", "spotlight"] = "sigproc",
 ):
     candies = Candies.load(candidates)
-    if (x := Interface["file"].get(interface)) is not None:
-        if datafile is None:
-            try:
-                datafile = candies["datafile"]
-            except KeyError:
-                log.error("NO DATAFILE. ABORT.")
-                exit()
-        for candy in track(candies, description="Storing...", transient=True):
-            x.load(fn=datafile).slice(candy).store(f"{candy.id}.highres.{fmt}")
-    elif (x := Interface["live"].get(interface)) is not None:
-        for candy in track(candies, description="Storing...", transient=True):
-            x.load().slice(candy).store(f"{candy.id}.highres.{fmt}")
-    else:
-        log.error("INVALID INTERFACE. ABORT.")
-        exit()
+
+    df = candies.pandas
+    groups = df.groupby("fn")
+    if datafile is not None:
+        df = df.replace({pd.NA: str(datafile)})
+
+    for fn, group in groups:
+        minis = Candies.load(group)
+        if (x := Interface["file"].get(interface)) is not None:
+            for mini in track(minis, description="Storing...", transient=True):
+                x.load(fn=fn).slice(mini).store(f"{mini.id}.highres.{fmt}")
+        elif (x := Interface["live"].get(interface)) is not None:
+            for mini in track(minis, description="Storing...", transient=True):
+                x.load().slice(mini).store(f"{mini.id}.highres.{fmt}")
+        else:
+            raise CandiesError("INVALID INTERFACE. ABORT.")
 
 
 @app.command
