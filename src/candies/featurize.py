@@ -16,6 +16,7 @@ class Featurizer:
 
     gpuid: int = 0
     zoom: bool = True
+    store: bool = False
     snratio: float = 0.1
 
     def __call__(self, candy: Candy) -> Candy:
@@ -70,6 +71,8 @@ class Featurizer:
                 cuda.atomic.add(Y, (kk, jjy), acc)  # type: ignore
 
         sliced = self.interface.slice(candy)
+        if self.store:
+            candy.sliced = sliced
         nf, nt = sliced.data.shape
 
         ndms = 256
@@ -161,6 +164,7 @@ def featurize(
     njobs: int = 1,
     gpuid: int = 0,
     zoom: bool = True,
+    store: bool = False,
     snratio: float = 0.1,
 ) -> Candies:
     with Pool(processes=njobs) as pool:
@@ -169,6 +173,7 @@ def featurize(
                 Featurizer(
                     zoom=zoom,
                     gpuid=gpuid,
+                    store=store,
                     snratio=snratio,
                     interface=interface,
                 ),

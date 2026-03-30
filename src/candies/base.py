@@ -384,6 +384,7 @@ class Candy:
     beam: int = 0
     label: bool = False
     probability: float = 0.0
+    sliced: Slice | None = None
     dedispersed: Dedispersed | None = None
     dmtransform: DMTransform | None = None
     extras: dict = field(default_factory=dict)
@@ -466,6 +467,8 @@ class Candy:
             self.dmtransform.plot(ax=axbtm)
 
             cells = {}
+            cells["FRB or RFI?"] = [f"{'FRB' if self.label else 'RFI'}"]
+            cells["Probability"] = [f"{self.probability:.4f}"]
             if len(hdr := self.extras) > 0:
                 src = str(hdr.get("source", "NA"))
                 ra = str(next((hdr[_] for _ in ["raj2000", "ra"] if _ in hdr), "NA"))

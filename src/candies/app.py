@@ -36,6 +36,8 @@ def make(
     njobs: int = 1,
     gpuid: int = 0,
     zoom: bool = True,
+    store: bool = False,
+    storeas: Literal["fil", "h5"] = "fil",
     datafile: str | Path | None = None,
     interface: Literal["splt", "gmrt", "sigproc", "spotlight"] = "sigproc",
 ):
@@ -55,11 +57,13 @@ def make(
             maker = partial(featurize, interface=x.load())
         else:
             raise CandiesError("INVALID INTERFACE. ABORT.")
-        minis = maker(zoom=zoom, njobs=njobs, gpuid=gpuid, candies=minis)
+        minis = maker(zoom=zoom, njobs=njobs, gpuid=gpuid, candies=minis, store=store)
         made.extend(minis)
 
     for candy in track(Candies(items=made), description="Saving...", transient=True):
         candy.save()
+        if store:
+            candy.sliced.store(f"{candy.id}.highres.{storeas}")
 
 
 @app.command
@@ -82,6 +86,8 @@ def wrap(
     gpuid: int = 0,
     zoom: bool = True,
     batchsize: int = 8,
+    store: bool = False,
+    storeas: Literal["fil", "h5"] = "fil",
     datafile: str | Path | None = None,
     interface: Literal["splt", "gmrt", "sigproc", "spotlight"] = "sigproc",
     model: Literal["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"] = "a",
@@ -102,19 +108,21 @@ def wrap(
             maker = partial(featurize, interface=x.load())
         else:
             raise CandiesError("INVALID INTERFACE. ABORT.")
-        minis = maker(zoom=zoom, njobs=njobs, gpuid=gpuid, candies=minis)
+        minis = maker(zoom=zoom, njobs=njobs, gpuid=gpuid, candies=minis, store=store)
         minis = classify(gpuid=gpuid, modelid=model, batchsize=batchsize, candies=minis)
         wrapped.extend(minis)
 
     for candy in track(Candies(items=wrapped), description="Saving...", transient=True):
         candy.save()
+        if store:
+            candy.sliced.store(f"{candy.id}.highres.{storeas}")
 
 
 @app.command
 def store(
     candidates: str | Path,
-    fmt: Literal["fil", "h5"] = "fil",
     datafile: str | Path | None = None,
+    storeas: Literal["fil", "h5"] = "fil",
     interface: Literal["splt", "gmrt", "sigproc", "spotlight"] = "sigproc",
 ):
     candies = Candies.load(candidates)
@@ -128,10 +136,10 @@ def store(
         minis = Candies.load(group)
         if (x := Interface["file"].get(interface)) is not None:
             for mini in track(minis, description="Storing...", transient=True):
-                x.load(fn=fn).slice(mini).store(f"{mini.id}.highres.{fmt}")
+                x.load(fn=fn).slice(mini).store(f"{mini.id}.highres.{storeas}")
         elif (x := Interface["live"].get(interface)) is not None:
             for mini in track(minis, description="Storing...", transient=True):
-                x.load().slice(mini).store(f"{mini.id}.highres.{fmt}")
+                x.load().slice(mini).store(f"{mini.id}.highres.{storeas}")
         else:
             raise CandiesError("INVALID INTERFACE. ABORT.")
 
