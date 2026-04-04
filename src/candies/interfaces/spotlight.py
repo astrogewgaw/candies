@@ -20,8 +20,6 @@ if OptDeps.SHAZAM.installed:
     @dataclass
     class SPOTLIGHTLive(LiveInterface):
 
-        ring: FRBRing
-
         @classmethod
         def load(cls) -> Self:
             ring = FRBRing()
@@ -29,7 +27,7 @@ if OptDeps.SHAZAM.installed:
 
             hdr = ring.header()
             curblk = ring.curblk
-            curtime = ring.timestamps[curblk]
+            curtime = ring.timestamps[curblk % ring.nbeamspernode]
             reftime = curtime - timedelta(seconds=curblk * ring.blktime)
             hdr["mjd"] = Time(
                 pytz.timezone("Asia/Kolkata")
@@ -38,7 +36,6 @@ if OptDeps.SHAZAM.installed:
             ).mjd
 
             return cls(
-                ring=ring,
                 df=ring.df,
                 dt=ring.dt,
                 fh=ring.fh,
@@ -49,10 +46,13 @@ if OptDeps.SHAZAM.installed:
             )
 
         def slice(self, candy: Candy) -> Slice:
+            ring = FRBRing()
+            ring.open("r")
+
             width = candy.wbin * self.dt
             maxdelay = 4.1488064239e3 * candy.dm * (self.fl**-2 - self.fh**-2)
             tbeg, tend = candy.t0 - maxdelay - width, candy.t0 + maxdelay + width
-            data = np.asarray(self.ring.getslice(tbeg=tbeg, tend=tend, beam=candy.beam))
+            data = np.asarray(ring.getslice(tbeg=tbeg, tend=tend, beam=candy.beam))
             data = np.ascontiguousarray(data.T)
             nf, nt = data.shape
 
@@ -62,8 +62,8 @@ if OptDeps.SHAZAM.installed:
             hdr["mjd"] = hdr["mjd"] + (candy.t0 * getattr(uzi, "s")).to("day").value
 
             radians = getattr(uzi, "rad")
-            ra = self.ring.beamras[candy.beam]
-            dec = self.ring.beamdecs[candy.beam]
+            ra = ring.beamras[candy.beam % ring.nbeamspernode]
+            dec = ring.beamdecs[candy.beam % ring.nbeamspernode]
             coords = SkyCoord(
                 ra * radians,
                 dec * radians,
