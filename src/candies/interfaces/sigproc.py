@@ -146,7 +146,7 @@ class SIGPROCFile(FileInterface):
                         .T
                     )
                     medians = np.median(tempdata, axis=1)
-                    data = np.ones_like((self.nf, NR)) * medians[:, None]
+                    data = np.ones((self.nf, NR)) * medians[:, None]
                     data[:, -N0 : -N0 + self.nt] = tempdata
             # CASE 3: If there is enough data in the beginning, but
             # not enough in the end. In this case, we just need to pad
