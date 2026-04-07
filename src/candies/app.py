@@ -34,7 +34,7 @@ def list_(
 def make(
     candidates: str | Path,
     njobs: int = 1,
-    gpuid: int = 0,
+    gpuid: int = -1,
     zoom: bool = True,
     store: bool = False,
     storeas: Literal["fil", "h5"] = "fil",
@@ -69,7 +69,7 @@ def make(
 @app.command
 def label(
     candidates: list[Path],
-    gpuid: int = 0,
+    gpuid: int = -1,
     batchsize: int = 8,
     model: Literal["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"] = "a",
 ):
@@ -83,7 +83,7 @@ def label(
 def wrap(
     candidates: str | Path,
     njobs: int = 1,
-    gpuid: int = 0,
+    gpuid: int = -1,
     zoom: bool = True,
     batchsize: int = 8,
     store: bool = False,

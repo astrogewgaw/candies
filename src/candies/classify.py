@@ -137,7 +137,7 @@ def batchify(candies: Candies, batchsize: int = 8) -> Generator:
 
 def classify(
     candies: Candies,
-    gpuid: int = 0,
+    gpuid: int = -1,
     batchsize: int = 8,
     modelid: Literal["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"] = "a",
 ) -> Candies:
