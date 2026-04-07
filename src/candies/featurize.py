@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from multiprocessing.pool import Pool
 
 import numpy as np
-from numba import cuda
+from numba import njit, cuda
 from scipy.signal import detrend
 
 from candies.logging import log
@@ -12,7 +12,141 @@ from candies.base import Candy, Candies, Dedispersed, DMTransform, CandiesError
 
 
 @dataclass
-class Featurizer:
+class CPUFeaturizer:
+    interface: Interface
+
+    zoom: bool = True
+    store: bool = False
+    snratio: float = 0.1
+
+    def __call__(self, candy: Candy) -> Candy:
+        try:
+            sliced = self.interface.slice(candy)
+            if self.store:
+                candy.sliced = sliced
+            nf, nt = sliced.data.shape
+
+            def znorm(X):
+                X = X.astype(np.float32)
+                X = np.nan_to_num(X)
+                X = detrend(X)
+                X = X - np.median(X)
+                X = X / np.std(X)
+                X = np.nan_to_num(X)
+                return X
+
+            @njit(cache=True, fastmath=True, boundscheck=False, error_model="numpy")
+            def crop(Y, X, stride):
+                nf = Y.shape[0]
+                nt = Y.shape[1]
+                for ii in range(nf):
+                    for jj in range(nt):
+                        Y[ii, jj] = X[ii, jj + stride]
+
+            @njit(cache=True, fastmath=True, boundscheck=False, error_model="numpy")
+            def calcdd(Y, X, shifts, td, fd):
+                nf = X.shape[0]
+                nt = X.shape[1]
+                for ii in range(nf):
+                    for jj in range(nt):
+                        iiy = ii // fd
+                        jjy = jj // td
+                        jjx = jj + shifts[ii]
+                        if jjx >= nt:
+                            jjx -= nt
+                        Y[iiy, jjy] += X[ii, jjx]
+
+            @njit(cache=True, fastmath=True, boundscheck=False, error_model="numpy")
+            def calcdmt(Y, X, shifts, td):
+                nf = X.shape[0]
+                nt = X.shape[1]
+                ndms = Y.shape[0]
+                for jj in range(nt):
+                    for kk in range(ndms):
+                        acc = 0.0
+                        jjy = jj // td
+                        for ii in range(nf):
+                            shift = shifts[kk, ii]
+                            jjx = jj + shift
+                            if jjx >= nt:
+                                jjx -= nt
+                            acc += X[ii, jjx]
+                        Y[kk, jjy] += acc
+
+            ndms = 256
+            fh = self.interface.fh
+            fl = self.interface.fl
+            nf = self.interface.nf
+            bw = self.interface.bw
+            dt = self.interface.dt
+            lodm, hidm = 0.0, 2.0 * candy.dm
+            if self.zoom:
+                fc = 0.5 * (fh + fl)
+                if (
+                    ddm := np.sqrt(np.pi)
+                    * fc**3
+                    * (candy.wbin * dt)
+                    / (1382 * self.snratio * bw)
+                ) < candy.dm:
+                    lodm, hidm = candy.dm - ddm, candy.dm + ddm
+            ddm = (hidm - lodm) / (ndms - 1)
+            ff = np.linspace(fh, fl, nf, dtype=np.float32)
+            dms = np.linspace(lodm, hidm, ndms, dtype=np.float32)
+            perdmshifts = (4.1488064239e3 * (ff**-2 - fh**-2) / dt).astype(np.float32)
+
+            shifts = (candy.dm * perdmshifts).astype(np.int32)
+            allshifts = (dms[:, None] * perdmshifts[None, :]).astype(np.int32)
+
+            td = 1 if candy.wbin < 3 else int(candy.wbin / 2)
+            fd = int(nf / 256)
+            nfred = int(nf / fd)
+            ntred = int(nt / td)
+
+            dd = np.zeros((nfred, ntred), dtype=np.float32)
+            dmt = np.zeros((ndms, ntred), dtype=np.float32)
+            ddcropped = np.zeros((256, 256), dtype=np.float32)
+            dmtcropped = np.zeros((256, 256), dtype=np.float32)
+
+            calcdd(dd, sliced.data, shifts, td, fd)
+            crop(ddcropped, dd, ntred // 2 - 128)
+
+            calcdmt(dmt, sliced.data, allshifts, td)
+            crop(dmtcropped, dmt, ntred // 2 - 128)
+
+            candy.dedispersed = Dedispersed(
+                nt=256,
+                nf=256,
+                fh=fh,
+                fl=fl,
+                dt=dt * td,
+                dm=candy.dm,
+                df=(fh - fl) / 256,
+                data=znorm(ddcropped),
+            )
+
+            candy.dmtransform = DMTransform(
+                nt=256,
+                ddm=ddm,
+                ndms=ndms,
+                lodm=lodm,
+                hidm=hidm,
+                dt=dt * td,
+                dm=candy.dm,
+                data=znorm(dmtcropped),
+            )
+
+            candy.extras["tbeg"] = sliced.tbeg
+            candy.extras["tend"] = sliced.tend
+            candy.extras = {**candy.extras, **sliced.extras}
+
+            return candy
+        except CandiesError:
+            log.error(f"Featurization failed for {candy.id}.")
+            return candy
+
+
+@dataclass
+class GPUFeaturizer:
     interface: Interface
 
     gpuid: int = 0
@@ -167,7 +301,7 @@ def featurize(
     candies: Candies,
     interface: Interface,
     njobs: int = 1,
-    gpuid: int = 0,
+    gpuid: int = -1,
     zoom: bool = True,
     store: bool = False,
     snratio: float = 0.1,
@@ -175,12 +309,21 @@ def featurize(
     with Pool(processes=njobs) as pool:
         candies = Candies(
             pool.map(
-                Featurizer(
-                    zoom=zoom,
-                    gpuid=gpuid,
-                    store=store,
-                    snratio=snratio,
-                    interface=interface,
+                (
+                    CPUFeaturizer(
+                        zoom=zoom,
+                        store=store,
+                        snratio=snratio,
+                        interface=interface,
+                    )
+                    if gpuid < 0
+                    else GPUFeaturizer(
+                        zoom=zoom,
+                        gpuid=gpuid,
+                        store=store,
+                        snratio=snratio,
+                        interface=interface,
+                    )
                 ),
                 candies,
                 chunksize=1,
