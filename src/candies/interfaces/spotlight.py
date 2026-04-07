@@ -1,9 +1,9 @@
-from datetime import timedelta
 from candies import OptDeps
 
 if OptDeps.SHAZAM.installed:
 
     from pathlib import Path
+    from datetime import timedelta
     from dataclasses import dataclass
 
     import pytz
@@ -14,8 +14,8 @@ if OptDeps.SHAZAM.installed:
     from typing_extensions import Self
     from astropy.coordinates import TETE, SkyCoord
 
-    from candies.base import Candy, Slice
     from candies.interfaces.base import LiveInterface
+    from candies.base import Candy, Slice, CandiesError
 
     @dataclass
     class SPOTLIGHTLive(LiveInterface):
@@ -27,7 +27,7 @@ if OptDeps.SHAZAM.installed:
 
             hdr = ring.header()
             curblk = ring.curblk
-            curtime = ring.timestamps[curblk % ring.nbeamspernode]
+            curtime = ring.timestamps[curblk % ring.maxblks]
             reftime = curtime - timedelta(seconds=curblk * ring.blktime)
             hdr["mjd"] = Time(
                 pytz.timezone("Asia/Kolkata")
@@ -52,7 +52,16 @@ if OptDeps.SHAZAM.installed:
             width = candy.wbin * self.dt
             maxdelay = 4.1488064239e3 * candy.dm * (self.fl**-2 - self.fh**-2)
             tbeg, tend = candy.t0 - maxdelay - width, candy.t0 + maxdelay + width
-            data = np.asarray(ring.getslice(tbeg=tbeg, tend=tend, beam=candy.beam))
+            try:
+                data = np.asarray(
+                    ring.getslice(
+                        tbeg=tbeg,
+                        tend=tend,
+                        beam=candy.beam % ring.nbeamspernode,
+                    )
+                )
+            except Exception as ex:
+                raise CandiesError(f"COULD NOT FETCH DATA: {ex:r}. ABORT.")
             data = np.ascontiguousarray(data.T)
             nf, nt = data.shape
 
