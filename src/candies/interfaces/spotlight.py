@@ -22,10 +22,9 @@ if OptDeps.SHAZAM.installed:
 
         @classmethod
         def load(cls) -> Self:
-            ring = FRBRing()
-            ring.open("r")
+            ring = FRBRing("r")
 
-            hdr = ring.header()
+            hdr = ring.header
             curblk = ring.curblk
             curtime = ring.timestamps[curblk % ring.maxblks]
             reftime = curtime - timedelta(seconds=curblk * ring.blktime)
@@ -46,8 +45,7 @@ if OptDeps.SHAZAM.installed:
             )
 
         def slice(self, candy: Candy) -> Slice:
-            ring = FRBRing()
-            ring.open("r")
+            ring = FRBRing("r")
 
             width = candy.wbin * self.dt
             maxdelay = 4.1488064239e3 * candy.dm * (self.fl**-2 - self.fh**-2)
