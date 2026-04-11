@@ -138,11 +138,9 @@ class CPUFeaturizer:
             candy.extras["tbeg"] = sliced.tbeg
             candy.extras["tend"] = sliced.tend
             candy.extras = {**candy.extras, **sliced.extras}
-
-            return candy
         except CandiesError:
             log.error(f"Featurization failed for {candy.id}.")
-            return candy
+        return candy
 
 
 @dataclass
@@ -285,16 +283,14 @@ class GPUFeaturizer:
                 dm=candy.dm,
                 data=znorm(dmtcropped.copy_to_host(stream=stream)),  # type: ignore
             )
+            cuda.close()
 
             candy.extras["tbeg"] = sliced.tbeg
             candy.extras["tend"] = sliced.tend
             candy.extras = {**candy.extras, **sliced.extras}
-
-            cuda.close()
-            return candy
         except CandiesError:
             log.error(f"Featurization failed for {candy.id}.")
-            return candy
+        return candy
 
 
 def featurize(
