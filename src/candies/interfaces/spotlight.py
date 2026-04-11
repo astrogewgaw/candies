@@ -97,3 +97,6 @@ if OptDeps.SHAZAM.installed:
                 nbits=self.nbits,
                 fn=Path(f"{candy.id}.highres.h5"),
             )
+
+
+__all__ = ["SPOTLIGHTLive"]

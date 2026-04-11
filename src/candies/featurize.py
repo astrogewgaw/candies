@@ -326,3 +326,6 @@ def featurize(
             )
         )
     return candies
+
+
+__all__ = ["CPUFeaturizer", "GPUFeaturizer", "featurize"]

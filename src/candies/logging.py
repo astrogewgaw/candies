@@ -31,3 +31,5 @@ if not structlog.is_configured():
         ),
     )
 log = structlog.get_logger()
+
+__all__ = ["log"]

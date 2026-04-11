@@ -189,3 +189,6 @@ class SIGPROCFile(FileInterface):
             fn=Path(f"{candy.id}.h5"),
             data=np.ascontiguousarray(data),
         )
+
+
+__all__ = ["SIGPROCFile"]

@@ -174,3 +174,6 @@ def classify(
             batch[ix] = candy
         labeled.extend(batch)
     return Candies(labeled)
+
+
+__all__ = ["classify"]

@@ -803,11 +803,4 @@ class Candies(MutableSequence):
         console.print(table)
 
 
-__all__ = [
-    "Slice",
-    "Candy",
-    "Candies",
-    "Dedispersed",
-    "DMTransform",
-    "CandiesError",
-]
+__all__ = ["Slice", "Candy", "Candies", "Dedispersed", "DMTransform", "CandiesError"]
