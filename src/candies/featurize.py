@@ -302,29 +302,24 @@ def featurize(
     store: bool = False,
     snratio: float = 0.1,
 ) -> Candies:
-    items = list(
-        Parallel(n_jobs=njobs)(
-            delayed(
-                (
-                    CPUFeaturizer(
-                        zoom=zoom,
-                        store=store,
-                        snratio=snratio,
-                        interface=interface,
-                    )
-                    if gpuid < 0
-                    else GPUFeaturizer(
-                        zoom=zoom,
-                        gpuid=gpuid,
-                        store=store,
-                        snratio=snratio,
-                        interface=interface,
-                    )
-                )(candy)
-                for candy in candies
-            )
+    featurizer = (
+        CPUFeaturizer(
+            zoom=zoom,
+            store=store,
+            snratio=snratio,
+            interface=interface,
+        )
+        if gpuid < 0
+        else GPUFeaturizer(
+            zoom=zoom,
+            gpuid=gpuid,
+            store=store,
+            snratio=snratio,
+            interface=interface,
         )
     )
+    items = Parallel(n_jobs=njobs)(delayed(featurizer)(candy) for candy in candies)
+    items = list(items)
     candies = Candies(items=items)  # type: ignore
     return candies
 
