@@ -1,10 +1,10 @@
 import math
 from dataclasses import dataclass
-from multiprocessing.pool import Pool
 
 import numpy as np
 from numba import njit, cuda
 from scipy.signal import detrend
+from joblib import Parallel, delayed
 
 from candies.logging import log
 from candies.interfaces import Interface
@@ -302,9 +302,9 @@ def featurize(
     store: bool = False,
     snratio: float = 0.1,
 ) -> Candies:
-    with Pool(processes=njobs) as pool:
-        candies = Candies(
-            pool.map(
+    items = list(
+        Parallel(n_jobs=njobs)(
+            delayed(
                 (
                     CPUFeaturizer(
                         zoom=zoom,
@@ -320,11 +320,12 @@ def featurize(
                         snratio=snratio,
                         interface=interface,
                     )
-                ),
-                candies,
-                chunksize=1,
+                )(candy)
+                for candy in candies
             )
         )
+    )
+    candies = Candies(items=items)  # type: ignore
     return candies
 
 

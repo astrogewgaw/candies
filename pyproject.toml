@@ -41,6 +41,7 @@ dependencies = [
   "matplotlib",
 
   # General purpose dependencies
+  "joblib",
   "orjson",
   "astropy",
   "requests",
