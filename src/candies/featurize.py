@@ -1,4 +1,5 @@
 import math
+from typing import cast
 from dataclasses import dataclass
 
 import numpy as np
@@ -8,7 +9,7 @@ from joblib import Parallel, delayed
 
 from candies.logging import log
 from candies.interfaces import Interface
-from candies.base import Candy, Candies, Dedispersed, DMTransform, CandiesError
+from candies.base import Candy, Candies, Dedispersed, DMTransform
 
 
 @dataclass
@@ -79,6 +80,8 @@ class CPUFeaturizer:
             nf = self.interface.nf
             bw = self.interface.bw
             dt = self.interface.dt
+
+            log.debug("Calculating DM range...")
             lodm, hidm = 0.0, 2.0 * candy.dm
             if self.zoom:
                 fc = 0.5 * (fh + fl)
@@ -90,10 +93,12 @@ class CPUFeaturizer:
                 ) < candy.dm:
                     lodm, hidm = candy.dm - ddm, candy.dm + ddm
             ddm = (hidm - lodm) / (ndms - 1)
+            log.debug(f"DM range: lodm={lodm}, hidm={hidm}, with ddm={ddm}.")
+
+            log.debug("Pre-calculating shifts...")
             ff = np.linspace(fh, fl, nf, dtype=np.float32)
             dms = np.linspace(lodm, hidm, ndms, dtype=np.float32)
             perdmshifts = (4.1488064239e3 * (ff**-2 - fh**-2) / dt).astype(np.float32)
-
             shifts = (candy.dm * perdmshifts).astype(np.int32)
             allshifts = (dms[:, None] * perdmshifts[None, :]).astype(np.int32)
 
@@ -101,7 +106,9 @@ class CPUFeaturizer:
             fd = int(nf / 256)
             nfred = int(nf / fd)
             ntred = int(nt / td)
+            log.debug(f"Downsampling by {fd} in frequency, {td} in time.")
 
+            log.debug(f"Creating features for {candy.id}...")
             dd = np.zeros((nfred, ntred), dtype=np.float32)
             dmt = np.zeros((ndms, ntred), dtype=np.float32)
             ddcropped = np.zeros((256, 256), dtype=np.float32)
@@ -134,12 +141,14 @@ class CPUFeaturizer:
                 dm=candy.dm,
                 data=znorm(dmtcropped),
             )
+            log.debug(f"Features created for {candy.id}.")
 
             candy.extras["tbeg"] = sliced.tbeg
             candy.extras["tend"] = sliced.tend
             candy.extras = {**candy.extras, **sliced.extras}
-        except CandiesError:
-            log.error(f"Featurization failed for {candy.id}.")
+            log.info(f"Featurization succeeded for {candy.id}.")
+        except Exception as ex:
+            log.error(f"Featurization failed for {candy.id}. ERROR: {str(ex)}.")
         return candy
 
 
@@ -215,6 +224,8 @@ class GPUFeaturizer:
             nf = self.interface.nf
             bw = self.interface.bw
             dt = self.interface.dt
+
+            log.debug("Calculating DM range...")
             lodm, hidm = 0.0, 2.0 * candy.dm
             if self.zoom:
                 fc = 0.5 * (fh + fl)
@@ -226,10 +237,12 @@ class GPUFeaturizer:
                 ) < candy.dm:
                     lodm, hidm = candy.dm - ddm, candy.dm + ddm
             ddm = (hidm - lodm) / (ndms - 1)
+            log.debug(f"DM range: lodm={lodm}, hidm={hidm}, with ddm={ddm}.")
+
+            log.debug("Pre-calculating shifts...")
             ff = np.linspace(fh, fl, nf, dtype=np.float32)
             dms = np.linspace(lodm, hidm, ndms, dtype=np.float32)
             perdmshifts = (4.1488064239e3 * (ff**-2 - fh**-2) / dt).astype(np.float32)
-
             shifts = (candy.dm * perdmshifts).astype(np.int32)
             allshifts = (dms[:, None] * perdmshifts[None, :]).astype(np.int32)
 
@@ -237,7 +250,9 @@ class GPUFeaturizer:
             fd = int(nf / 256)
             nfred = int(nf / fd)
             ntred = int(nt / td)
+            log.debug(f"Downsampling by {fd} in frequency, {td} in time.")
 
+            log.debug(f"Creating features for {candy.id}...")
             shiftsdevice = cuda.to_device(shifts, stream=stream)
             datadevice = cuda.to_device(sliced.data, stream=stream)
             allshiftsdevice = cuda.to_device(allshifts, stream=stream)
@@ -284,12 +299,14 @@ class GPUFeaturizer:
                 data=znorm(dmtcropped.copy_to_host(stream=stream)),  # type: ignore
             )
             cuda.close()
+            log.debug(f"Features created for {candy.id}.")
 
             candy.extras["tbeg"] = sliced.tbeg
             candy.extras["tend"] = sliced.tend
             candy.extras = {**candy.extras, **sliced.extras}
-        except CandiesError:
-            log.error(f"Featurization failed for {candy.id}.")
+            log.info(f"Featurization succeeded for {candy.id}.")
+        except Exception as ex:
+            log.error(f"Featurization failed for {candy.id}. ERROR: {str(ex)}.")
         return candy
 
 
@@ -302,26 +319,34 @@ def featurize(
     store: bool = False,
     snratio: float = 0.1,
 ) -> Candies:
-    featurizer = (
-        CPUFeaturizer(
-            zoom=zoom,
-            store=store,
-            snratio=snratio,
-            interface=interface,
-        )
-        if gpuid < 0
-        else GPUFeaturizer(
-            zoom=zoom,
-            gpuid=gpuid,
-            store=store,
-            snratio=snratio,
-            interface=interface,
+    return Candies(
+        items=cast(
+            list[Candy],
+            list(
+                Parallel(n_jobs=njobs)(
+                    delayed(
+                        (
+                            CPUFeaturizer(
+                                zoom=zoom,
+                                store=store,
+                                snratio=snratio,
+                                interface=interface,
+                            )
+                            if gpuid < 0
+                            else GPUFeaturizer(
+                                zoom=zoom,
+                                gpuid=gpuid,
+                                store=store,
+                                snratio=snratio,
+                                interface=interface,
+                            )
+                        )
+                    )(candy)
+                    for candy in candies
+                )
+            ),
         )
     )
-    items = Parallel(n_jobs=njobs)(delayed(featurizer)(candy) for candy in candies)
-    items = list(items)
-    candies = Candies(items=items)  # type: ignore
-    return candies
 
 
 __all__ = ["CPUFeaturizer", "GPUFeaturizer", "featurize"]

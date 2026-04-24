@@ -6,11 +6,15 @@ import cyclopts
 import matplotlib
 import pandas as pd
 from rich.progress import track
+from rich.console import Console
 
+from candies.logging import log
 from candies.classify import classify
 from candies.featurize import featurize
 from candies.interfaces import Interface
 from candies.base import Candies, CandiesError
+
+console = Console()
 
 app = cyclopts.App()
 app["--help"].group = "Admin"
@@ -49,20 +53,28 @@ def make(
     groups = df.groupby("fn")
 
     made = []
-    for fn, group in groups:
-        minis = Candies.load(group)
-        if (x := Interface["file"].get(interface)) is not None:
-            maker = partial(featurize, interface=x.load(fn=fn))
-        elif (x := Interface["live"].get(interface)) is not None:
-            maker = partial(featurize, interface=x.load())
-        else:
-            raise CandiesError("INVALID INTERFACE. ABORT.")
-        minis = maker(zoom=zoom, njobs=njobs, gpuid=gpuid, candies=minis, store=store)
-        made.extend(minis)
-
+    with console.status("Featurizing..."):
+        for fn, group in groups:
+            minis = Candies.load(group)
+            if (x := Interface["file"].get(interface)) is not None:
+                maker = partial(featurize, interface=x.load(fn=fn))
+            elif (x := Interface["live"].get(interface)) is not None:
+                maker = partial(featurize, interface=x.load())
+            else:
+                raise CandiesError("INVALID INTERFACE. ABORT.")
+            made.extend(
+                maker(
+                    zoom=zoom,
+                    njobs=njobs,
+                    gpuid=gpuid,
+                    candies=minis,
+                    store=store,
+                )
+            )
     for candy in track(Candies(items=made), description="Saving...", transient=True):
         candy.save()
         if store:
+            log.debug(f"Saved {candy.id} to disk.")
             candy.sliced.store(f"{candy.id}.highres.{storeas}")
 
 
@@ -74,8 +86,15 @@ def label(
     model: Literal["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"] = "a",
 ):
     candies = Candies.load(candidates)
-    candies = classify(gpuid=gpuid, modelid=model, batchsize=batchsize, candies=candies)
+    with console.status("Classifying..."):
+        candies = classify(
+            gpuid=gpuid,
+            modelid=model,
+            batchsize=batchsize,
+            candies=candies,
+        )
     for candy in track(candies, description="Saving...", transient=True):
+        log.debug(f"Saved {candy.id} to disk.")
         candy.save()
 
 
@@ -100,21 +119,33 @@ def wrap(
     groups = df.groupby("fn")
 
     wrapped = []
-    for fn, group in groups:
-        minis = Candies.load(group)
-        if (x := Interface["file"].get(interface)) is not None:
-            maker = partial(featurize, interface=x.load(fn=fn))
-        elif (x := Interface["live"].get(interface)) is not None:
-            maker = partial(featurize, interface=x.load())
-        else:
-            raise CandiesError("INVALID INTERFACE. ABORT.")
-        minis = maker(zoom=zoom, njobs=njobs, gpuid=gpuid, candies=minis, store=store)
-        minis = classify(gpuid=gpuid, modelid=model, batchsize=batchsize, candies=minis)
-        wrapped.extend(minis)
-
+    with console.status("Featurizing and classifying..."):
+        for fn, group in groups:
+            minis = Candies.load(group)
+            if (x := Interface["file"].get(interface)) is not None:
+                maker = partial(featurize, interface=x.load(fn=fn))
+            elif (x := Interface["live"].get(interface)) is not None:
+                maker = partial(featurize, interface=x.load())
+            else:
+                raise CandiesError("INVALID INTERFACE. ABORT.")
+            wrapped.extend(
+                classify(
+                    gpuid=gpuid,
+                    modelid=model,
+                    batchsize=batchsize,
+                    candies=maker(
+                        zoom=zoom,
+                        njobs=njobs,
+                        gpuid=gpuid,
+                        candies=minis,
+                        store=store,
+                    ),
+                )
+            )
     for candy in track(Candies(items=wrapped), description="Saving...", transient=True):
         candy.save()
         if store:
+            log.debug(f"Saved {candy.id} to disk.")
             candy.sliced.store(f"{candy.id}.highres.{storeas}")
 
 
