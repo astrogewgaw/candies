@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from autoregistry import Registry
 from typing_extensions import Self
 
-from candies.base import Slice, Candy
+from candies.base import Candy
 
 
 @dataclass
@@ -28,7 +28,7 @@ class Interface(Registry, recursive=False, suffix="Interface"):
         return self.fh - self.bw + (0.5 * self.df)
 
     @abstractmethod
-    def slice(self, candy: Candy) -> Slice:
+    def slice(self, candy: Candy) -> Candy:
         pass
 
 

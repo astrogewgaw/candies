@@ -44,7 +44,7 @@ if OptDeps.SHAZAM.installed:
                 nbits=ring.nbits,
             )
 
-        def slice(self, candy: Candy) -> Slice:
+        def slice(self, candy: Candy) -> Candy:
             ring = FRBRing("r")
 
             width = candy.wbin * self.dt
@@ -81,7 +81,7 @@ if OptDeps.SHAZAM.installed:
             hdr["raj2000"] = f"{rah}h{ram}m{ras}s"
             hdr["decj2000"] = f"{decd}d{decm}m{decs}s"
 
-            return Slice(
+            sliced = Slice(
                 nf=nf,
                 nt=nt,
                 tbeg=tbeg,
@@ -90,11 +90,17 @@ if OptDeps.SHAZAM.installed:
                 extras=hdr,
                 fh=self.fh,
                 fl=self.fl,
+                bw=self.bw,
                 df=self.df,
                 dt=self.dt,
                 nbits=self.nbits,
                 fn=Path(f"{candy.id}.highres.h5"),
             )
+            candy.sliced = sliced
+            candy.extras["tbeg"] = sliced.tbeg
+            candy.extras["tend"] = sliced.tend
+            candy.extras = {**candy.extras, **sliced.extras}
+            return candy
 
 
 __all__ = ["SPOTLIGHTLive"]

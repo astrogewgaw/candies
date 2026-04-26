@@ -212,6 +212,7 @@ class Slice:
     dt: float
     fh: float
     fl: float
+    bw: float
     nbits: int
     tbeg: float
     tend: float

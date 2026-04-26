@@ -88,7 +88,7 @@ class GMRTFile(FileInterface):
             nbits=hdr["nbits"],
         )
 
-    def slice(self, candy: Candy) -> Slice:
+    def slice(self, candy: Candy) -> Candy:
         width = candy.wbin * self.dt
         maxdelay = 4.1488064239e3 * candy.dm * (self.fl**-2 - self.fh**-2)
         tbeg, tend = candy.t0 - maxdelay - width, candy.t0 + maxdelay + width
@@ -191,7 +191,7 @@ class GMRTFile(FileInterface):
             hdr["endmjd"] = mjd + (tend * getattr(uzi, "s")).to("day").value
             hdr["mjd"] = mjd + (candy.t0 * getattr(uzi, "s")).to("day").value
 
-        return Slice(
+        sliced = Slice(
             nf=nf,
             nt=nt,
             tbeg=tbeg,
@@ -199,12 +199,18 @@ class GMRTFile(FileInterface):
             extras=hdr,
             fh=self.fh,
             fl=self.fl,
+            bw=self.bw,
             df=self.df,
             dt=self.dt,
             nbits=self.nbits,
             fn=Path(f"{candy.id}.h5"),
             data=np.ascontiguousarray(data),
         )
+        candy.sliced = sliced
+        candy.extras["tbeg"] = sliced.tbeg
+        candy.extras["tend"] = sliced.tend
+        candy.extras = {**candy.extras, **sliced.extras}
+        return candy
 
 
 __all__ = ["GMRTFile"]
