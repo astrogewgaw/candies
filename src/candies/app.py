@@ -1,17 +1,14 @@
 from pathlib import Path
 from typing import Literal
-from functools import partial
 
 import cyclopts
 import matplotlib
-import pandas as pd
 from rich.progress import track
 from rich.console import Console
 
-from candies.logging import log
 from candies.classify import classify
 from candies.featurize import featurize
-from candies.interfaces import Interface
+from candies.interfaces import FileInterface
 from candies.base import Candies, CandiesError
 
 console = Console()
@@ -41,40 +38,35 @@ def make(
     gpuid: int = -1,
     zoom: bool = True,
     store: bool = False,
-    storeas: Literal["fil", "h5"] = "fil",
     datafile: str | Path | None = None,
+    storeas: Literal["fil", "h5"] = "fil",
     interface: Literal["splt", "gmrt", "sigproc", "spotlight"] = "sigproc",
 ):
     candies = Candies.load(candidates)
 
     df = candies.pandas
     if datafile is not None:
-        df = df.replace({pd.NA: str(datafile)})
-    groups = df.groupby("fn")
+        df["fn"] = df["fn"].fillna(str(datafile))
 
     made = []
     with console.status("Featurizing..."):
-        for fn, group in groups:
-            minis = Candies.load(group)
-            if (x := Interface["file"].get(interface)) is not None:
-                maker = partial(featurize, interface=x.load(fn=fn))
-            elif (x := Interface["live"].get(interface)) is not None:
-                maker = partial(featurize, interface=x.load())
-            else:
-                raise CandiesError("INVALID INTERFACE. ABORT.")
-            made.extend(
-                maker(
-                    zoom=zoom,
-                    njobs=njobs,
-                    gpuid=gpuid,
-                    candies=minis,
-                    store=store,
+        for fn, group in df.groupby("fn"):
+            try:
+                made.extend(
+                    featurize(
+                        zoom=zoom,
+                        njobs=njobs,
+                        gpuid=gpuid,
+                        store=store,
+                        candies=Candies.load(group),
+                        interface=FileInterface[interface].load(fn=fn),
+                    )
                 )
-            )
+            except KeyError:
+                raise CandiesError("INVALID INTERFACE. ABORT.")
     for candy in track(Candies(items=made), description="Saving...", transient=True):
         candy.save()
         if store:
-            log.debug(f"Saved {candy.id} to disk.")
             candy.sliced.store(f"{candy.id}.highres.{storeas}")
 
 
@@ -90,11 +82,10 @@ def label(
         candies = classify(
             gpuid=gpuid,
             modelid=model,
-            batchsize=batchsize,
             candies=candies,
+            batchsize=batchsize,
         )
     for candy in track(candies, description="Saving...", transient=True):
-        log.debug(f"Saved {candy.id} to disk.")
         candy.save()
 
 
@@ -115,37 +106,32 @@ def wrap(
 
     df = candies.pandas
     if datafile is not None:
-        df = df.replace({pd.NA: str(datafile)})
-    groups = df.groupby("fn")
+        df["fn"] = df["fn"].fillna(str(datafile))
 
     wrapped = []
     with console.status("Featurizing and classifying..."):
-        for fn, group in groups:
-            minis = Candies.load(group)
-            if (x := Interface["file"].get(interface)) is not None:
-                maker = partial(featurize, interface=x.load(fn=fn))
-            elif (x := Interface["live"].get(interface)) is not None:
-                maker = partial(featurize, interface=x.load())
-            else:
-                raise CandiesError("INVALID INTERFACE. ABORT.")
-            wrapped.extend(
-                classify(
-                    gpuid=gpuid,
-                    modelid=model,
-                    batchsize=batchsize,
-                    candies=maker(
-                        zoom=zoom,
-                        njobs=njobs,
+        for fn, group in df.groupby("fn"):
+            try:
+                wrapped.extend(
+                    classify(
                         gpuid=gpuid,
-                        candies=minis,
-                        store=store,
-                    ),
+                        modelid=model,
+                        batchsize=batchsize,
+                        candies=featurize(
+                            zoom=zoom,
+                            njobs=njobs,
+                            gpuid=gpuid,
+                            store=store,
+                            candies=Candies.load(group),
+                            interface=FileInterface[interface].load(fn=fn),
+                        ),
+                    )
                 )
-            )
+            except KeyError:
+                raise CandiesError("INVALID INTERFACE. ABORT.")
     for candy in track(Candies(items=wrapped), description="Saving...", transient=True):
         candy.save()
         if store:
-            log.debug(f"Saved {candy.id} to disk.")
             candy.sliced.store(f"{candy.id}.highres.{storeas}")
 
 
@@ -159,19 +145,19 @@ def store(
     candies = Candies.load(candidates)
 
     df = candies.pandas
-    groups = df.groupby("fn")
     if datafile is not None:
-        df = df.replace({pd.NA: str(datafile)})
+        df["fn"] = df["fn"].fillna(str(datafile))
 
-    for fn, group in groups:
-        minis = Candies.load(group)
-        if (x := Interface["file"].get(interface)) is not None:
-            for mini in track(minis, description="Storing...", transient=True):
-                x.load(fn=fn).slice(mini).store(f"{mini.id}.highres.{storeas}")
-        elif (x := Interface["live"].get(interface)) is not None:
-            for mini in track(minis, description="Storing...", transient=True):
-                x.load().slice(mini).store(f"{mini.id}.highres.{storeas}")
-        else:
+    for fn, group in df.groupby("fn"):
+        try:
+            for candy in track(
+                transient=True,
+                description="Storing...",
+                sequence=Candies.load(group),
+            ):
+                candy = FileInterface[interface].load(fn=fn).slice(candy)
+                candy.sliced.store(f"{candy.id}.highres.{storeas}")
+        except KeyError:
             raise CandiesError("INVALID INTERFACE. ABORT.")
 
 
@@ -186,9 +172,9 @@ def plot(
     if not show:
         matplotlib.use("agg")
     for candy in track(
-        Candies.load(candidates),
-        description="Plotting...",
         transient=True,
+        description="Plotting...",
+        sequence=Candies.load(candidates),
     ):
         candy.plot(
             dpi=dpi,
@@ -197,7 +183,7 @@ def plot(
         )
 
 
-__all__ = []
+__all__ = ["app"]
 
 if __name__ == "__main__":
     app()
