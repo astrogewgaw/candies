@@ -1,4 +1,5 @@
 import math
+from typing import cast
 from abc import abstractmethod
 from dataclasses import dataclass
 
@@ -44,7 +45,7 @@ class Featurizer(Registry, recursive=False, suffix="Featurizer"):
         if self.candy.sliced is not None:
             return self.candy.sliced
         if self.interface is not None:
-            self.interface.slice(self.candy)
+            self.candy = self.interface.slice(self.candy)
             assert self.candy.sliced is not None
             return self.candy.sliced
         else:
@@ -163,20 +164,21 @@ class Featurizer(Registry, recursive=False, suffix="Featurizer"):
         return int(self.nt / self.td)
 
     @abstractmethod
-    def run(self) -> None:
+    def run(self) -> Candy:
         pass
 
-    def __call__(self) -> None:
+    def __call__(self) -> Candy:
         try:
-            self.run()
+            self.candy = self.run()
         except Exception as ex:
             log.error(f"Featurization failed for {self.candy.id}. ERROR: {str(ex)}.")
         log.info(f"Featurization succeeded for {self.candy.id}.")
+        return self.candy
 
 
 @dataclass
 class CPUFeaturizer(Featurizer):
-    def run(self):
+    def run(self) -> Candy:
         @njit(cache=True, fastmath=True, boundscheck=False, error_model="numpy")
         def crop(Y, X, stride):
             nf = Y.shape[0]
@@ -247,11 +249,12 @@ class CPUFeaturizer(Featurizer):
             dt=self.dt * self.td,
             data=znorm(dmtcropped),
         )
+        return self.candy
 
 
 @dataclass
 class GPUFeaturizer(Featurizer):
-    def run(self) -> None:
+    def run(self) -> Candy:
         cuda.select_device(self.gpuid)
         stream = cuda.stream()
 
@@ -342,6 +345,7 @@ class GPUFeaturizer(Featurizer):
             data=znorm(dmtcropped.copy_to_host(stream=stream)),  # type: ignore
         )
         cuda.close()
+        return self.candy
 
 
 def featurize(
@@ -353,19 +357,27 @@ def featurize(
     store: bool = False,
     snratio: float = 0.1,
 ) -> Candies:
-    featurizers = [
-        Featurizer["CPU" if gpuid < 0 else "GPU"](
-            candy=candy,
-            zoom=zoom,
-            gpuid=gpuid,
-            store=store,
-            snratio=snratio,
-            interface=interface,
+    return Candies(
+        items=cast(
+            list[Candy],
+            list(
+                Parallel(n_jobs=njobs)(
+                    delayed(_)()
+                    for _ in [
+                        Featurizer["CPU" if gpuid < 0 else "GPU"](
+                            candy=candy,
+                            zoom=zoom,
+                            gpuid=gpuid,
+                            store=store,
+                            snratio=snratio,
+                            interface=interface,
+                        )
+                        for candy in candies
+                    ]
+                )
+            ),
         )
-        for candy in candies
-    ]
-    Parallel(n_jobs=njobs)(delayed(_)() for _ in featurizers)
-    return Candies(items=[_.candy for _ in featurizers])
+    )
 
 
 __all__ = ["Featurizer", "CPUFeaturizer", "GPUFeaturizer", "featurize"]
