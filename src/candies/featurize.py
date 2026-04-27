@@ -255,15 +255,6 @@ class GPUFeaturizer(Featurizer):
         cuda.select_device(self.gpuid)
         stream = cuda.stream()
 
-        def znorm(X):
-            X = X.astype(np.float32)
-            X = np.nan_to_num(X)
-            X = detrend(X)
-            X = X - np.median(X)
-            X = X / np.std(X)
-            X = np.nan_to_num(X)
-            return X
-
         @cuda.jit(cache=True, fastmath=True)
         def crop(Y, X, stride):
             nf = Y.shape[0]

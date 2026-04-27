@@ -400,7 +400,7 @@ class Candy:
                     f"MJD{mjd:.7f}_"
                     if (
                         mjd := (
-                            self.extras.get("tstart", None)
+                            self.extras.get("mjd", None)
                             if self.extras is not None
                             else None
                         )
