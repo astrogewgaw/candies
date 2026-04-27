@@ -168,11 +168,10 @@ class Featurizer(Registry, recursive=False, suffix="Featurizer"):
 
     def __call__(self) -> None:
         try:
-            log.debug(f"Featurization started for {self.candy.id}...")
             self.run()
-            log.info(f"Featurization succeeded for {self.candy.id}.")
         except Exception as ex:
             log.error(f"Featurization failed for {self.candy.id}. ERROR: {str(ex)}.")
+        log.info(f"Featurization succeeded for {self.candy.id}.")
 
 
 @dataclass

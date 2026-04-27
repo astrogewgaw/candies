@@ -7,6 +7,7 @@ import requests
 import numpy as np
 import onnxruntime as ort
 
+from candies.logging import log
 from candies.base import Candies, CandiesError
 
 REGISTRY = {
@@ -172,6 +173,7 @@ def classify(
             candy.probability = probability
             candy.label = probability >= 0.5
             batch[ix] = candy
+            log.info(f"Classification succeeded for {candy.id}.")
         labeled.extend(batch)
     return Candies(labeled)
 

@@ -4,14 +4,11 @@ from typing import Literal
 import cyclopts
 import matplotlib
 from rich.progress import track
-from rich.console import Console
 
 from candies.classify import classify
 from candies.featurize import featurize
 from candies.interfaces import FileInterface
 from candies.base import Candies, CandiesError
-
-console = Console()
 
 app = cyclopts.App()
 app["--help"].group = "Admin"
@@ -49,21 +46,20 @@ def make(
         df["fn"] = df["fn"].fillna(str(datafile))
 
     made = []
-    with console.status("Featurizing..."):
-        for fn, group in df.groupby("fn"):
-            try:
-                made.extend(
-                    featurize(
-                        zoom=zoom,
-                        njobs=njobs,
-                        gpuid=gpuid,
-                        store=store,
-                        candies=Candies.load(group),
-                        interface=FileInterface[interface].load(fn=fn),
-                    )
+    for fn, group in df.groupby("fn"):
+        try:
+            made.extend(
+                featurize(
+                    zoom=zoom,
+                    njobs=njobs,
+                    gpuid=gpuid,
+                    store=store,
+                    candies=Candies.load(group),
+                    interface=FileInterface[interface].load(fn=fn),
                 )
-            except KeyError:
-                raise CandiesError("INVALID INTERFACE. ABORT.")
+            )
+        except KeyError:
+            raise CandiesError("INVALID INTERFACE. ABORT.")
     for candy in track(Candies(items=made), description="Saving...", transient=True):
         candy.save()
         if store:
@@ -78,13 +74,12 @@ def label(
     model: Literal["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"] = "a",
 ):
     candies = Candies.load(candidates)
-    with console.status("Classifying..."):
-        candies = classify(
-            gpuid=gpuid,
-            modelid=model,
-            candies=candies,
-            batchsize=batchsize,
-        )
+    candies = classify(
+        gpuid=gpuid,
+        modelid=model,
+        candies=candies,
+        batchsize=batchsize,
+    )
     for candy in track(candies, description="Saving...", transient=True):
         candy.save()
 
@@ -109,26 +104,25 @@ def wrap(
         df["fn"] = df["fn"].fillna(str(datafile))
 
     wrapped = []
-    with console.status("Featurizing and classifying..."):
-        for fn, group in df.groupby("fn"):
-            try:
-                wrapped.extend(
-                    classify(
+    for fn, group in df.groupby("fn"):
+        try:
+            wrapped.extend(
+                classify(
+                    gpuid=gpuid,
+                    modelid=model,
+                    batchsize=batchsize,
+                    candies=featurize(
+                        zoom=zoom,
+                        njobs=njobs,
                         gpuid=gpuid,
-                        modelid=model,
-                        batchsize=batchsize,
-                        candies=featurize(
-                            zoom=zoom,
-                            njobs=njobs,
-                            gpuid=gpuid,
-                            store=store,
-                            candies=Candies.load(group),
-                            interface=FileInterface[interface].load(fn=fn),
-                        ),
-                    )
+                        store=store,
+                        candies=Candies.load(group),
+                        interface=FileInterface[interface].load(fn=fn),
+                    ),
                 )
-            except KeyError:
-                raise CandiesError("INVALID INTERFACE. ABORT.")
+            )
+        except KeyError:
+            raise CandiesError("INVALID INTERFACE. ABORT.")
     for candy in track(Candies(items=wrapped), description="Saving...", transient=True):
         candy.save()
         if store:
