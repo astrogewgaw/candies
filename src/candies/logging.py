@@ -1,3 +1,4 @@
+import os
 import sys
 import orjson
 import logging
@@ -23,7 +24,14 @@ if not structlog.is_configured():
     structlog.configure(
         processors=processors,
         cache_logger_on_first_use=True,
-        wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
+        wrapper_class=structlog.make_filtering_bound_logger(
+            {
+                "0": logging.INFO,
+                "1": logging.DEBUG,
+                "True": logging.DEBUG,
+                "False": logging.INFO,
+            }[str(os.environ.get("CANDIES_DEBUG", "False"))]
+        ),
         logger_factory=(
             structlog.BytesLoggerFactory()
             if not sys.stderr.isatty()
