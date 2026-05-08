@@ -1,6 +1,7 @@
 import re
+from typing import cast
 from pathlib import Path
-from autoregistry import Registry
+from datetime import datetime
 from dataclasses import field, dataclass
 from collections.abc import MutableSequence
 
@@ -13,6 +14,7 @@ from rich.table import Table
 from astropy.time import Time
 from ultraplot.axes import Axes
 from rich.console import Console
+from autoregistry import Registry
 from typing_extensions import Self
 from priwo import readhdr, readfil, writefil
 
@@ -84,25 +86,32 @@ class Dedispersed:
         self,
         ax: Axes | None = None,
         show: bool = True,
+        showprofile: bool = True,
         save: str | Path | bool = False,
         **kwargs,
     ):
         def plotter(ax):
             hm = ax.imshow(
                 self.data,
-                cmap="magma",
+                cmap="batloww",
                 aspect="auto",
-                origin="lower",
                 interpolation="none",
                 vmin=self.data.min(),
                 vmax=self.data.max(),
                 extent=(self.times[0], self.times[-1], self.freqs[-1], self.freqs[0]),
             )
             ax.colorbar(hm)
+            ax.format(ylabel=r"$\nu$ (MHz)", xlabel=r"$\Delta t$ (ms)")
+
+            if showprofile:
+                px = ax.panel("t", width="5em")
+                px.plot(self.times, self.profile, color="black")
+                px.format(yticklabels=[], xlabel=r"$\Delta t$ (ms)")
 
         if ax is None:
             fig = getattr(uplt, "figure")(width=3.5, height=3.5)
-            plotter(fig.subplot())
+            ax = cast(Axes, fig.subplot())
+            plotter(ax)
             if show:
                 getattr(uplt, "show")()
             if save:
@@ -178,19 +187,20 @@ class DMTransform:
         def plotter(ax):
             hm = ax.imshow(
                 self.data,
-                cmap="magma",
+                cmap="batloww",
                 aspect="auto",
-                origin="lower",
                 interpolation="none",
                 vmin=self.data.min(),
                 vmax=self.data.max(),
                 extent=(self.times[0], self.times[-1], self.dms[-1], self.dms[0]),
             )
             ax.colorbar(hm)
+            ax.format(ylabel=r"DM (pc cm$^{-3}$)", xlabel=r"$\Delta t$ (ms)")
 
         if ax is None:
             fig = getattr(uplt, "figure")(width=3.5, height=3.5)
-            plotter(fig.subplot())
+            ax = cast(Axes, fig.subplot())
+            plotter(ax)
             if show:
                 getattr(uplt, "show")()
             if save:
@@ -354,18 +364,20 @@ class Slice:
         def plotter(ax):
             hm = ax.imshow(
                 self.data,
-                cmap="magma",
+                cmap="batloww",
                 aspect="auto",
-                origin="lower",
                 vmin=self.data.min(),
                 vmax=self.data.max(),
                 extent=(self.times[0], self.times[-1], self.freqs[-1], self.freqs[0]),
             )
             ax.colorbar(hm)
+            ax.format(ylabel=r"$\nu$ (MHz)", xlabel=r"$\Delta t$ (ms)")
 
         if ax is None:
             fig = getattr(uplt, "figure")(width=3.5, height=3.5)
-            plotter(fig.subplot())
+            ax = cast(Axes, fig.subplot())
+            plotter(ax)
+            ax.format(suptitle=str(self.fn.name))
             if show:
                 getattr(uplt, "show")()
             if save:
@@ -374,6 +386,7 @@ class Slice:
                 fig.savefig(save, dpi=kwargs.get("dpi", 150))
         else:
             plotter(ax)
+            ax.format(title=str(self.fn.name))
 
 
 @dataclass
@@ -457,102 +470,132 @@ class Candy:
     def plot(
         self,
         show: bool = True,
+        showdd: bool = True,
+        showdmt: bool = True,
+        showtable: bool = True,
+        showprofile: bool = True,
         save: str | Path | bool = False,
         **kwargs,
     ):
         if (self.dedispersed is not None) and (self.dmtransform is not None):
-            fig = getattr(uplt, "figure")(width=7.5, height=5, sharey=False)
-            gs = uplt.GridSpec(nrows=2, ncols=3)
-            axtab = fig.subplot(gs[:, -1])
-            axtop = fig.subplot(gs[0, :-1])
-            axbtm = fig.subplot(gs[1, :-1])
-            self.dedispersed.plot(ax=axtop)
-            self.dmtransform.plot(ax=axbtm)
+            nrows, ncols = {
+                (1, 1, 1): (2, 3),
+                (1, 1, 0): (2, 2),
+                (1, 0, 0): (1, 2),
+                (0, 1, 0): (1, 2),
+                (0, 0, 1): (1, 1),
+                (1, 0, 1): (1, 3),
+                (0, 1, 1): (1, 3),
+            }[(showdd, showdmt, showtable)]
+            gs = uplt.GridSpec(nrows=nrows, ncols=ncols)
 
-            cells = {}
-            cells["FRB or RFI?"] = [f"{'FRB' if self.label else 'RFI'}"]
-            cells["Probability"] = [f"{self.probability:.4f}"]
-            if len(hdr := self.extras) > 0:
-                src = str(hdr.get("source", "NA"))
-                ra = str(next((hdr[_] for _ in ["raj2000", "ra"] if _ in hdr), "NA"))
-                dec = str(next((hdr[_] for _ in ["decj2000", "dec"] if _ in hdr), "NA"))
-                cells["Source name"] = [src]
-                cells["Right ascension, RA (J2000)"] = [ra]
-                cells["Declination, DEC (J2000)"] = [dec]
-            cells[r"$t_{cand}$"] = [f"{self.t0:.2f} s"]
-            if len(hdr := self.extras) > 0:
-                mjd = hdr.get("mjd", "NA")
-                cells["MJD"] = [f"{mjd:.9f}" if isinstance(mjd, float) else mjd]
-            cells["DM"] = [f"{self.dm:.2f} pc cm$^{{-3}}$"]
-            cells["SNR"] = [f"{self.snr:.2f}"]
-            cells[r"$W_{bin}$"] = [f"{self.wbin:d} bins"]
-            cells[r"$N_{t}$ (original)"] = [
-                f"{self.dedispersed.nt * (1 if self.wbin < 3 else int(self.wbin / 2)):d}"
-            ]
-            cells[r"$N_{t}$ (downsampled)"] = [f"{self.dedispersed.nt:d}"]
-            if len(hdr := self.extras) > 0:
-                nforig = next((hdr[_] for _ in ["nf", "nchans"] if _ in hdr), "NA")
-                cells[r"$N_{\nu}$ (original)"] = [
-                    f"{nforig:d}" if isinstance(nforig, int) else nforig
-                ]
-            cells[r"$N_{\nu}$ (downsampled)"] = [f"{self.dedispersed.nf:d}"]
-            if len(hdr := self.extras) > 0:
-                dtorig = next((hdr[_] for _ in ["dt", "tsamp"] if _ in hdr), "NA")
-                cells[r"$\delta t$ (original)"] = [
-                    (
-                        rf"{dtorig * 1e6:.2f} $\mu$s"
-                        if isinstance(dtorig, float)
-                        else dtorig
+            width, height = 2.5 * ncols, 3.0 * nrows
+            fig = getattr(uplt, "figure")(width=width, height=height, share=False)
+
+            if showdd:
+                axtop = fig.subplot(gs[0, 0:2])
+                self.dedispersed.plot(ax=axtop, showprofile=showprofile)
+
+            if showdmt:
+                axbtm = fig.subplot(gs[1 if showdd else 0, 0:2])
+                self.dmtransform.plot(ax=axbtm)
+
+            if showtable:
+                axtab = fig.subplot(gs[:, 2 if (showdd or showdmt) else 0])
+
+                cells = {}
+                cells["FRB or RFI?"] = [f"{'FRB' if self.label else 'RFI'}"]
+                cells["Probability"] = [f"{self.probability:.4f}"]
+                if len(hdr := self.extras) > 0:
+                    src = str(hdr.get("source", "NA"))
+                    ra = str(
+                        next((hdr[_] for _ in ["raj2000", "ra"] if _ in hdr), "NA")
                     )
+                    dec = str(
+                        next((hdr[_] for _ in ["decj2000", "dec"] if _ in hdr), "NA")
+                    )
+                    cells["Source name"] = [src]
+                    cells["Right ascension, RA (J2000)"] = [ra]
+                    cells["Declination, DEC (J2000)"] = [dec]
+                cells[r"$t_{cand}$"] = [f"{self.t0:.2f} s"]
+                if len(hdr := self.extras) > 0:
+                    mjd = hdr.get("mjd", "NA")
+                    cells["MJD"] = [f"{mjd:.9f}" if isinstance(mjd, float) else mjd]
+                cells["DM"] = [f"{self.dm:.2f} pc cm$^{{-3}}$"]
+                cells["SNR"] = [f"{self.snr:.2f}"]
+                cells[r"$W_{bin}$"] = [f"{self.wbin:d} bins"]
+                cells[r"$N_{t}$ (original)"] = [
+                    f"{self.dedispersed.nt * (1 if self.wbin < 3 else int(self.wbin / 2)):d}"
                 ]
-            cells[r"$\delta t$ (downsampled)"] = [
-                rf"{self.dedispersed.dt * 1e6:.2f} $\mu$s"
-            ]
-            if len(hdr := self.extras) > 0:
-                dforig = next(
-                    (hdr[_] for _ in ["df", "foff", "chanwidth"] if _ in hdr),
-                    "NA",
-                )
-                cells[r"$\delta \nu$ (original)"] = [
-                    f"{dforig * 1e3:.2f} kHz" if isinstance(dforig, float) else dforig
+                cells[r"$N_{t}$ (downsampled)"] = [f"{self.dedispersed.nt:d}"]
+                if len(hdr := self.extras) > 0:
+                    nforig = next((hdr[_] for _ in ["nf", "nchans"] if _ in hdr), "NA")
+                    cells[r"$N_{\nu}$ (original)"] = [
+                        f"{nforig:d}" if isinstance(nforig, int) else nforig
+                    ]
+                cells[r"$N_{\nu}$ (downsampled)"] = [f"{self.dedispersed.nf:d}"]
+                if len(hdr := self.extras) > 0:
+                    dtorig = next((hdr[_] for _ in ["dt", "tsamp"] if _ in hdr), "NA")
+                    cells[r"$\delta t$ (original)"] = [
+                        (
+                            rf"{dtorig * 1e6:.2f} $\mu$s"
+                            if isinstance(dtorig, float)
+                            else dtorig
+                        )
+                    ]
+                cells[r"$\delta t$ (downsampled)"] = [
+                    rf"{self.dedispersed.dt * 1e6:.2f} $\mu$s"
                 ]
-            cells[r"$\delta \nu$ (downsampled)"] = [
-                f"{self.dedispersed.df * 1e3:.2f} kHz"
-            ]
-            cells[r"$\nu_{first}$"] = [f"{self.dedispersed.fh:.2f} MHz"]
-            cells[r"$\nu_{last}$"] = [f"{self.dedispersed.fl:.2f} MHz"]
-            cells[r"$N_{DM}$"] = [f"{self.dmtransform.ndms:d}"]
-            cells[r"$\delta$DM"] = [f"{self.dmtransform.ddm:.2f} pc cm$^{{-3}}$"]
-            cells[r"$DM_{low}$"] = [f"{self.dmtransform.lodm:.2f} pc cm$^{{-3}}$"]
-            cells[r"$DM_{high}$"] = [f"{self.dmtransform.hidm:.2f} pc cm$^{{-3}}$"]
+                if len(hdr := self.extras) > 0:
+                    dforig = next(
+                        (hdr[_] for _ in ["df", "foff", "chanwidth"] if _ in hdr),
+                        "NA",
+                    )
+                    cells[r"$\delta \nu$ (original)"] = [
+                        (
+                            f"{dforig * 1e3:.2f} kHz"
+                            if isinstance(dforig, float)
+                            else dforig
+                        )
+                    ]
+                cells[r"$\delta \nu$ (downsampled)"] = [
+                    f"{self.dedispersed.df * 1e3:.2f} kHz"
+                ]
+                cells[r"$\nu_{first}$"] = [f"{self.dedispersed.fh:.2f} MHz"]
+                cells[r"$\nu_{last}$"] = [f"{self.dedispersed.fl:.2f} MHz"]
+                cells[r"$N_{DM}$"] = [f"{self.dmtransform.ndms:d}"]
+                cells[r"$\delta$DM"] = [f"{self.dmtransform.ddm:.2f} pc cm$^{{-3}}$"]
+                cells[r"$DM_{low}$"] = [f"{self.dmtransform.lodm:.2f} pc cm$^{{-3}}$"]
+                cells[r"$DM_{high}$"] = [f"{self.dmtransform.hidm:.2f} pc cm$^{{-3}}$"]
 
-            axtab.axis("off")
-            table = axtab.table(
-                loc="center",
-                edges="closed",
-                cellLoc="center",
-                rowLabels=list(cells.keys()),
-                cellText=list(cells.values()),
-            )
-            table.auto_set_font_size(False)
+                axtab.axis("off")
+                table = axtab.table(
+                    loc="center",
+                    edges="closed",
+                    cellLoc="center",
+                    rowLabels=list(cells.keys()),
+                    cellText=list(cells.values()),
+                )
+                table.auto_set_font_size(False)
 
             if len(hdr := self.extras) > 0:
                 titleparts = []
-                gtaccode = hdr.get("gtaccode", None)
-                if gtaccode is not None:
-                    titleparts.append(f"GTAC Code {gtaccode}")
+                if (gtaccode := hdr.get("gtaccode", None)) is not None:
+                    titleparts.append(f"GTAC Code: {gtaccode}")
 
                 mjd = hdr.get("mjd", None)
                 if mjd is not None:
                     timestamp = (
-                        pytz.utc.localize(Time(mjd, format="mjd").to_datetime())  # type: ignore
+                        pytz.utc.localize(
+                            cast(datetime, Time(mjd, format="mjd").to_datetime())
+                        )
                         .astimezone(pytz.timezone("Asia/Kolkata"))
                         .isoformat()
                     )
-                    titleparts.append(f"{timestamp}")
+                    titleparts.append(f"Detected at {timestamp}")
 
                 if len(titleparts) > 0:
-                    fig.suptitle(" | ".join(titleparts))
+                    fig.suptitle("\n".join(titleparts))
 
             if show:
                 getattr(uplt, "show")()
