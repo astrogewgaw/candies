@@ -4,13 +4,22 @@ import orjson
 import logging
 import structlog
 
+
+def isipython() -> bool:
+    try:
+        __IPYTHON__  # type: ignore
+        return True
+    except NameError:
+        return False
+
+
 shared_processors = [
     structlog.processors.add_log_level,
     structlog.contextvars.merge_contextvars,
     structlog.processors.TimeStamper(fmt="iso", utc=True),
 ]
 
-if sys.stderr.isatty():
+if sys.stderr.isatty() or isipython():
     processors = shared_processors + [structlog.dev.ConsoleRenderer()]
 else:
     processors = shared_processors + [
@@ -34,7 +43,7 @@ if not structlog.is_configured():
         ),
         logger_factory=(
             structlog.BytesLoggerFactory()
-            if not sys.stderr.isatty()
+            if not (sys.stderr.isatty() or isipython())
             else structlog.PrintLoggerFactory(sys.stdout)
         ),
     )
