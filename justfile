@@ -1,9 +1,12 @@
 pkg  := "candies"
-desc := "Sweet, sweet candy-dates!"
 
 alias c := clean
 alias i := install
 alias u := uninstall
+
+# List available commands.
+default:
+  @just --choose
 
 # Clean up.
 @clean:
