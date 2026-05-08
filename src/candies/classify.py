@@ -8,7 +8,7 @@ import numpy as np
 import onnxruntime as ort
 
 from candies.logging import log
-from candies.base import Candies, CandiesError
+from candies.base import Candy, Candies, CandiesError
 
 REGISTRY = {
     "a": {
@@ -137,11 +137,13 @@ def batchify(candies: Candies, batchsize: int = 8) -> Generator:
 
 
 def classify(
-    candies: Candies,
+    candies: Candy | Candies,
     gpuid: int = -1,
     batchsize: int = 8,
     modelid: Literal["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"] = "a",
 ) -> Candies:
+    if isinstance(candies, Candy):
+        candies = Candies(items=[candies])
     providers = []
     available_providers = ort.get_available_providers()
     if "CUDAExecutionProvider" in available_providers:
