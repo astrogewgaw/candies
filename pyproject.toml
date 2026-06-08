@@ -58,7 +58,7 @@ Documentation = "https://github.com/astrogewgaw/candies"
 Issues = "https://github.com/astrogewgaw/candies/issues"
 
 [project.scripts]
-candies = "candies.app:app"
+candies = "candies.app.run:app"
 
 [tool.setuptools]
 zip-safe = false
