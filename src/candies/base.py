@@ -226,7 +226,7 @@ class Slice:
     nbits: int
     tbeg: float
     tend: float
-    extras: dict
+    extras: dict = field(default_factory=dict)
 
     @classmethod
     def load(cls, fn: str | Path) -> Self:
@@ -849,4 +849,11 @@ class Candies(MutableSequence):
         console.print(table)
 
 
-__all__ = ["Slice", "Candy", "Candies", "Dedispersed", "DMTransform", "CandiesError"]
+__all__ = [
+    "Slice",
+    "Candy",
+    "Candies",
+    "Dedispersed",
+    "DMTransform",
+    "CandiesError",
+]
