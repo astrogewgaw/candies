@@ -4,25 +4,16 @@ from typing import Literal, Annotated
 from cyclopts import Parameter
 from cyclopts.types import ExistingFile, ExistingDirectory
 
+StoreFormats = Literal["fil", "h5"]
+InterfaceOptions = Literal["gmrt", "sigproc"]
+
 
 def store(
     candidates: list[ExistingFile],
     datafile: ExistingFile | None = None,
-    interface: Annotated[
-        Literal[
-            "gmrt",
-            "sigproc",
-        ],
-        Parameter(alias="-i"),
-    ] = "sigproc",
-    storeformat: Annotated[
-        Literal[
-            "fil",
-            "h5",
-        ],
-        Parameter(name=["-fmt", "--format"]),
-    ] = "fil",
     storeto: ExistingDirectory = Path.cwd(),
+    interface: Annotated[InterfaceOptions, Parameter(alias="-i")] = "sigproc",
+    storeformat: Annotated[StoreFormats, Parameter(name=["-fmt", "--format"])] = "fil",
 ):
     from rich.progress import track
     from candies.interfaces import FileInterface

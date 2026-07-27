@@ -1,33 +1,27 @@
+from pathlib import Path
 from typing import Literal, Annotated
 
 from cyclopts import Parameter
 from cyclopts.validators import Number
-from cyclopts.types import ExistingFile, ExistingCsvPath
+from cyclopts.types import PositiveInt, ExistingFile, ExistingDirectory
+
+StoreFormats = Literal["fil", "h5"]
+InterfaceOptions = Literal["gmrt", "sigproc"]
 
 
 def make(
-    candidates: ExistingCsvPath,
+    candidates: ExistingFile,
     datafile: ExistingFile | None = None,
+    zoom: Annotated[bool, Parameter(alias="-z")] = True,
+    storebursts: Annotated[bool, Parameter(alias="-s")] = False,
+    batchsize: Annotated[PositiveInt, Parameter(alias="-b")] = 100,
+    out: Annotated[ExistingDirectory, Parameter(alias="-o")] = Path.cwd(),
+    storeformat: Annotated[StoreFormats, Parameter(alias="-sfmt")] = "fil",
+    interface: Annotated[InterfaceOptions, Parameter(alias="-i")] = "sigproc",
     njobs: Annotated[int, Parameter(alias="-n", validator=Number(gte=-1))] = 1,
     gpuid: Annotated[int, Parameter(alias="-g", validator=Number(gte=-1))] = -1,
-    zoom: Annotated[bool, Parameter(alias="-z")] = True,
-    interface: Annotated[
-        Literal[
-            "gmrt",
-            "sigproc",
-        ],
-        Parameter(alias="-i"),
-    ] = "sigproc",
-    storebursts: Annotated[bool, Parameter(alias="-s")] = False,
-    storeformat: Annotated[
-        Literal[
-            "fil",
-            "h5",
-        ],
-        Parameter(alias="-sfmt"),
-    ] = "fil",
 ):
-    from rich.progress import track
+    import numpy as np
     from candies.featurize import featurize
     from candies.interfaces import FileInterface
     from candies.base import Candies, CandiesError
@@ -38,25 +32,26 @@ def make(
     if datafile is not None:
         df["fn"] = df["fn"].fillna(str(datafile))
 
-    made = []
     for fn, group in df.groupby("fn"):
         try:
-            made.extend(
-                featurize(
-                    zoom=zoom,
-                    njobs=njobs,
-                    gpuid=gpuid,
-                    store=storebursts,
-                    candies=Candies.load(group),
-                    interface=FileInterface[interface].load(fn=fn),
+            made = []
+            for _, batch in group.groupby(np.arange(len(group) // batchsize)):
+                made.append(
+                    featurize(
+                        zoom=zoom,
+                        njobs=njobs,
+                        gpuid=gpuid,
+                        store=storebursts,
+                        candies=Candies.load(batch),
+                        interface=FileInterface[interface].load(fn=fn),
+                    )
                 )
-            )
         except KeyError:
             raise CandiesError("INVALID INTERFACE. ABORT.")
-    for candy in track(Candies(items=made), description="Saving...", transient=True):
-        candy.save()
-        if storebursts:
-            candy.sliced.store(f"{candy.id}.highres.{storeformat}")
+        for candy in Candies(items=made):
+            candy.save(fn=out)
+            if storebursts:
+                candy.sliced.store(f"{candy.id}.highres.{storeformat}")
 
 
 __all__ = ["make"]

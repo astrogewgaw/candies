@@ -42,14 +42,13 @@ class Featurizer(Registry, recursive=False, suffix="Featurizer"):
 
     @property
     def sliced(self) -> Slice:
-        if self.candy.sliced is not None:
-            return self.candy.sliced
-        if self.interface is not None:
-            self.candy = self.interface.slice(self.candy)
-            assert self.candy.sliced is not None
-            return self.candy.sliced
-        else:
+        if (self.candy.sliced is None) and (self.interface is None):
             raise CandiesError("NO INTERFACE OR DATA PROVIDED. ABORT.")
+        return (
+            self.candy.sliced
+            if self.candy.sliced is not None
+            else cast(Slice, cast(Interface, self.interface).slice(self.candy).sliced)
+        )
 
     @property
     def data(self) -> np.ndarray:
@@ -249,6 +248,10 @@ class CPUFeaturizer(Featurizer):
             dt=self.dt * self.td,
             data=znorm(dmtcropped),
         )
+
+        if not self.store:
+            self.candy.sliced = None
+
         return self.candy
 
 
@@ -344,7 +347,12 @@ class GPUFeaturizer(Featurizer):
             dt=self.dt * self.td,
             data=znorm(dmtcropped.copy_to_host(stream=stream)),  # type: ignore
         )
+
         cuda.close()
+
+        if not self.store:
+            self.candy.sliced = None
+
         return self.candy
 
 
@@ -380,4 +388,9 @@ def featurize(
     )
 
 
-__all__ = ["Featurizer", "CPUFeaturizer", "GPUFeaturizer", "featurize"]
+__all__ = [
+    "featurize",
+    "Featurizer",
+    "CPUFeaturizer",
+    "GPUFeaturizer",
+]

@@ -1,30 +1,19 @@
+from pathlib import Path
 from typing import Literal, Annotated
 
 from cyclopts import Parameter
 from cyclopts.validators import Number
-from cyclopts.types import ExistingFile, NonNegativeInt
+from cyclopts.types import PositiveInt, ExistingFile, ExistingDirectory
+
+ModelOptions = Literal["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"]
 
 
 def label(
     candidates: list[ExistingFile],
+    model: Annotated[ModelOptions, Parameter(alias="-m")] = "a",
+    batchsize: Annotated[PositiveInt, Parameter(alias="-b")] = 8,
+    out: Annotated[ExistingDirectory, Parameter(alias="-o")] = Path.cwd(),
     gpuid: Annotated[int, Parameter(alias="-g", validator=Number(gte=-1))] = -1,
-    batchsize: Annotated[NonNegativeInt, Parameter(alias="-b")] = 8,
-    model: Annotated[
-        Literal[
-            "a",
-            "b",
-            "c",
-            "d",
-            "e",
-            "f",
-            "g",
-            "h",
-            "i",
-            "j",
-            "k",
-        ],
-        Parameter(alias="-m"),
-    ] = "a",
 ):
     from rich.progress import track
     from candies.base import Candies
@@ -38,7 +27,7 @@ def label(
         batchsize=batchsize,
     )
     for candy in track(candies, description="Saving...", transient=True):
-        candy.save()
+        candy.save(fn=out)
 
 
 __all__ = ["label"]

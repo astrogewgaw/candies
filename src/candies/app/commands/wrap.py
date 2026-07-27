@@ -1,50 +1,30 @@
+from pathlib import Path
 from typing import Literal, Annotated
 
 from cyclopts import Parameter
 from cyclopts.validators import Number
-from cyclopts.types import ExistingFile, NonNegativeInt, ExistingCsvPath
+from cyclopts.types import PositiveInt, ExistingFile, ExistingDirectory
+
+StoreFormats = Literal["fil", "h5"]
+InterfaceOptions = Literal["gmrt", "sigproc"]
+ModelOptions = Literal["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"]
 
 
 def wrap(
-    candidates: ExistingCsvPath,
+    candidates: ExistingFile,
     datafile: ExistingFile | None = None,
+    zoom: Annotated[bool, Parameter(alias="-z")] = True,
+    model: Annotated[ModelOptions, Parameter(alias="-m")] = "a",
+    storebursts: Annotated[bool, Parameter(alias="-s")] = False,
+    wrapsize: Annotated[PositiveInt, Parameter(alias="-w")] = 8,
+    batchsize: Annotated[PositiveInt, Parameter(alias="-b")] = 100,
+    out: Annotated[ExistingDirectory, Parameter(alias="-o")] = Path.cwd(),
+    storeformat: Annotated[StoreFormats, Parameter(alias="-sfmt")] = "fil",
+    interface: Annotated[InterfaceOptions, Parameter(alias="-i")] = "sigproc",
     njobs: Annotated[int, Parameter(alias="-n", validator=Number(gte=-1))] = 1,
     gpuid: Annotated[int, Parameter(alias="-g", validator=Number(gte=-1))] = -1,
-    zoom: Annotated[bool, Parameter(alias="-z")] = True,
-    batchsize: Annotated[NonNegativeInt, Parameter(alias="-b")] = 8,
-    model: Annotated[
-        Literal[
-            "a",
-            "b",
-            "c",
-            "d",
-            "e",
-            "f",
-            "g",
-            "h",
-            "i",
-            "j",
-            "k",
-        ],
-        Parameter(alias="-m"),
-    ] = "a",
-    interface: Annotated[
-        Literal[
-            "gmrt",
-            "sigproc",
-        ],
-        Parameter(alias="-i"),
-    ] = "sigproc",
-    storebursts: Annotated[bool, Parameter(alias="-s")] = False,
-    storeformat: Annotated[
-        Literal[
-            "fil",
-            "h5",
-        ],
-        Parameter(alias="-sfmt"),
-    ] = "fil",
 ):
-    from rich.progress import track
+    import numpy as np
     from candies.classify import classify
     from candies.featurize import featurize
     from candies.interfaces import FileInterface
@@ -56,30 +36,31 @@ def wrap(
     if datafile is not None:
         df["fn"] = df["fn"].fillna(str(datafile))
 
-    wrapped = []
     for fn, group in df.groupby("fn"):
         try:
-            wrapped.extend(
-                classify(
-                    gpuid=gpuid,
-                    modelid=model,
-                    batchsize=batchsize,
-                    candies=featurize(
+            made = []
+            for _, batch in group.groupby(np.arange(len(group) // batchsize)):
+                made.append(
+                    featurize(
                         zoom=zoom,
                         njobs=njobs,
                         gpuid=gpuid,
                         store=storebursts,
                         candies=Candies.load(group),
                         interface=FileInterface[interface].load(fn=fn),
-                    ),
+                    )
                 )
-            )
         except KeyError:
             raise CandiesError("INVALID INTERFACE. ABORT.")
-    for candy in track(Candies(items=wrapped), description="Saving...", transient=True):
-        candy.save()
-        if storebursts:
-            candy.sliced.store(f"{candy.id}.highres.{storeformat}")
+        for candy in classify(
+            gpuid=gpuid,
+            modelid=model,
+            batchsize=wrapsize,
+            candies=Candies(made),
+        ):
+            candy.save()
+            if storebursts:
+                candy.sliced.store(f"{candy.id}.highres.{storeformat}")
 
 
 __all__ = ["wrap"]

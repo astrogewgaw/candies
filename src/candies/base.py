@@ -451,7 +451,12 @@ class Candy:
             )
 
     def save(self, fn: str | Path | None = None) -> None:
-        fn = self.id + ".h5" if fn is None else fn
+        if fn is not None:
+            fn = Path(fn)
+            if fn.is_dir():
+                fn = fn / (self.id + ".h5")
+        else:
+            fn = Path.cwd() / (self.id + ".h5")
         with h5.File(fn, "w") as f:
             f.attrs["dm"] = self.dm
             f.attrs["t0"] = self.t0
