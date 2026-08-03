@@ -1,65 +1,30 @@
-"""
-The base code for candies.
-"""
-
-import logging
+import re
+from typing import cast
 from pathlib import Path
-from dataclasses import dataclass
+from datetime import datetime
+from dataclasses import field, dataclass
 from collections.abc import MutableSequence
 
+import pytz
 import h5py as h5
-import matplotlib
 import numpy as np
 import pandas as pd
 import ultraplot as uplt
-from rich.logging import RichHandler
-
-logging.basicConfig(
-    level="INFO",
-    datefmt="[%X]",
-    format="%(message)s",
-    handlers=[RichHandler(rich_tracebacks=True)],
-)
-log = logging.getLogger("candies")
+from rich.table import Table
+from astropy.time import Time
+from ultraplot.axes import Axes
+from rich.console import Console
+from autoregistry import Registry
+from typing_extensions import Self
+from priwo import readhdr, readfil, writefil
 
 
 class CandiesError(Exception):
-    """
-    Represents any error in candies.
-    """
-
     pass
 
 
 @dataclass
 class Dedispersed:
-    """
-    Represents a dedispersed dynamic spectrum.
-
-    The dynamic spectrum has frequency channels along the y-axis and
-    time samples along the x-axis. As is convention, the first channel
-    corresponds to the highest frequency in the band. This is one of the
-    features used by the classifier.
-
-    Parameters
-    ----------
-    nt: int
-        The number of time samples.
-    nf: int
-        The number of frequency channels.
-    df: float
-        The channel width (in MHz).
-    dt: float
-        The sampling time (in seconds).
-    fl: float
-        The lowest frequency (in MHz).
-    fh: float
-        The highest frequency (in MHz).
-    dm: float
-        The dispersion measure at which the data was dedispersed at.
-    data: numpy.ndarray
-        The dedispersed dynamic spectrum as a 2D Numpy array.
-    """
 
     nt: int
     nf: int
@@ -71,17 +36,9 @@ class Dedispersed:
     data: np.ndarray
 
     @classmethod
-    def load(cls, fname: str | Path):
-        """
-        Load a dedispersed dynamic spectrum from a HDF5 file.
-
-        Parameters
-        ----------
-        fname: str or Path
-            Path to the HDF5 file.
-        """
-        with h5.File(fname, "r") as f:
-            attrs = {k: np.asarray(v) for k, v in f.attrs.items()}
+    def load(cls, fn: str | Path):
+        with h5.File(fn, "r") as f:
+            attrs = dict(f.attrs.items())
             return cls(
                 nt=int(attrs["nt"]),
                 nf=int(attrs["nf"]),
@@ -95,104 +52,20 @@ class Dedispersed:
 
     @property
     def freqs(self) -> np.ndarray:
-        """
-        The frequency (in MHz) of each channel.
-        """
         return np.linspace(self.fh, self.fl, self.nf)
 
     @property
     def times(self) -> np.ndarray:
-        """
-        The time (in ms) of each sample, calculated w.r.t. to the arrival time of the burst.
-        """
         ntmid = self.nt // 2
         deltat = ntmid * self.dt * 1e3
         return np.linspace(-deltat, +deltat, self.nt)
 
     @property
     def profile(self) -> np.ndarray:
-        """
-        The dedispersed profile of the burst.
-        """
         return self.data.sum(0)
 
-    def plot(
-        self,
-        /,
-        dpi: int = 96,
-        save: bool = True,
-        show: bool = False,
-        ax: uplt.Axes | None = None,
-        saveto: str | Path = "dedispersed.png",
-    ):
-        """
-        Plot a dedispersed dynamic spectrum.
-
-        Parameters
-        ----------
-        dpi: int, optional
-            The dots per pixel (dpi) of the saved plot. Set to 96 by default.
-        save: bool, optional
-            Save the plot to a PNG file. True by default.
-        show: bool, optional
-            Show the plot in a separate window. False by default.
-        ax: uplt.Axes, optional
-            The axis, in case we are plotting this as part of another plot. Default is None.
-        saveto: str or Path
-            Path where to save the plot. Default is "dedispersed.png" in the current working directory.
-        """
-
-        def _plot(ax: uplt.Axes) -> None:
-            px = ax.panel_axes("top", width="5em", space=0)
-            px.plot(self.times, self.profile, lw=0.5, cycle="batlow")
-            px.set_yticks([])
-
-            ax.format(xlabel=r"$\Delta t$ (in ms)", ylabel="Frequency (in MHz)")
-
-            flagged = np.all(self.data == self.data[0, :], axis=1)
-            X = self.data.copy()
-            X[flagged, :] = np.nan
-
-            ax.imshow(
-                X,
-                aspect="auto",
-                cmap="batlow",
-                interpolation="none",
-                extent=(
-                    self.times[0],
-                    self.times[-1],
-                    self.freqs[-1],
-                    self.freqs[0],
-                ),
-                vmin=float(np.nanmean(X) - 5 * np.nanstd(X)),
-                vmax=float(np.nanmean(X) + 5 * np.nanstd(X)),
-            )
-
-        if ax is None:
-            if not show:
-                matplotlib.use("agg")
-            fig = uplt.figure()
-            ax = fig.subplot()
-            assert ax is not None
-            _plot(ax)
-            if save:
-                fig.savefig(saveto, dpi=dpi)
-            if show:
-                uplt.show()
-            uplt.close(fig)
-        else:
-            _plot(ax)
-
-    def save(self, fname: str | Path) -> None:
-        """
-        Save a dedispersed dynamic spectrum to a HDF5 file.
-
-        Parameters
-        ----------
-        fname: str or Path
-            Path to save the HDF5 file to.
-        """
-        with h5.File(fname, "a") as f:
+    def save(self, fn: str | Path) -> None:
+        with h5.File(fn, "a") as f:
             f.attrs["nf"] = self.nf
             f.attrs["nt"] = self.nt
             f.attrs["dt"] = self.dt
@@ -209,163 +82,92 @@ class Dedispersed:
             dataset.dims[1].label = b"time"
             dataset.dims[0].label = b"frequency"
 
+    def plot(
+        self,
+        ax: Axes | None = None,
+        show: bool = True,
+        showprofile: bool = True,
+        save: str | Path | bool = False,
+        **kwargs,
+    ):
+        def plotter(ax):
+            hm = ax.imshow(
+                self.data,
+                cmap="batloww",
+                aspect="auto",
+                interpolation="none",
+                vmin=self.data.min(),
+                vmax=self.data.max(),
+                extent=(self.times[0], self.times[-1], self.freqs[-1], self.freqs[0]),
+            )
+            ax.colorbar(hm)
+            ax.format(ylabel=r"$\nu$ (MHz)", xlabel=r"$\Delta t$ (ms)")
+
+            if showprofile:
+                px = ax.panel("t", width="5em")
+                px.plot(self.times, self.profile, color="black")
+                px.format(yticklabels=[], xlabel=r"$\Delta t$ (ms)")
+
+        if ax is None:
+            fig = getattr(uplt, "figure")(width=3.5, height=3.5)
+            ax = cast(Axes, fig.subplot())
+            plotter(ax)
+            if show:
+                getattr(uplt, "show")()
+            if save:
+                if not isinstance(save, str | Path):
+                    save = "dedispersed.png"
+                fig.savefig(save, dpi=kwargs.get("dpi", 150))
+        else:
+            plotter(ax)
+
 
 @dataclass
 class DMTransform:
-    """
-    Represents a DM transform.
-
-    A DM transform is obtained by dedispersing a dynamic spectrum across
-    a range of DMs. The value at the center of this range corresponds to
-    the "correct" DM value. The time series obtained are then stacked, and
-    we obtain a 2D array. This array is the DM transform. This is one of the
-    features used by the classifier. We expect to see a bowtie-like structure
-    in the DM-time plane for an actual FRB.
-
-    Parameters
-    ----------
-    nt: int
-        The number of time samples.
-    ndms: int
-        The number of DMs.
-    dm: float
-        The dispersion measure at the center of the DM range.
-    dt: float
-        The sampling time (in seconds).
-    ddm: float
-        The DM step used (in pc cm^-3).
-    dmlow: float
-        The lowest DM value (in pc cm^-3).
-    dmhigh: float
-        The highest DM value (in pc cm^-3).
-    data: numpy.ndarray
-        The DM transform as a 2D Numpy array.
-    """
 
     nt: int
     ndms: int
     dm: float
     dt: float
     ddm: float
-    dmlow: float
-    dmhigh: float
+    lodm: float
+    hidm: float
     data: np.ndarray
 
     @classmethod
-    def load(cls, fname: str | Path):
-        """
-        Load a Dm transform from a HDF5 file.
-
-        Parameters
-        ----------
-        fname: str or Path
-            Path to the HDF5 file.
-        """
-        with h5.File(fname, "r") as f:
-            attrs = {k: np.asarray(v) for k, v in f.attrs.items()}
+    def load(cls, fn: str | Path):
+        with h5.File(fn, "r") as f:
+            attrs = dict(f.attrs.items())
             return cls(
                 nt=int(attrs["nt"]),
                 dm=float(attrs["dm"]),
                 dt=float(attrs["dt"]),
                 ddm=float(attrs["ddm"]),
                 ndms=int(attrs["ndms"]),
-                dmlow=float(attrs["dmlow"]),
-                dmhigh=float(attrs["dmhigh"]),
+                lodm=float(attrs["lodm"]),
+                hidm=float(attrs["hidm"]),
                 data=np.asarray(f["data_dm_time"]),
             )
 
     @property
     def dms(self) -> np.ndarray:
-        """
-        The DMs used to obtain the DM transform.
-        """
-        return np.linspace(self.dmlow, self.dmhigh, self.ndms)
+        return np.linspace(self.lodm, self.hidm, self.ndms)
 
     @property
     def times(self) -> np.ndarray:
-        """
-        The time (in ms) of each sample, calculated w.r.t. to the arrival time of the burst.
-        """
         ntmid = self.nt // 2
         deltat = ntmid * self.dt * 1e3
         return np.linspace(-deltat, +deltat, self.nt)
 
-    def plot(
-        self,
-        /,
-        dpi: int = 96,
-        save: bool = True,
-        show: bool = False,
-        ax: uplt.Axes | None = None,
-        saveto: str = "dmtransform.png",
-    ):
-        """
-        Plot a dedispersed dynamic spectrum.
-
-        Parameters
-        ----------
-        dpi: int, optional
-            The dots per pixel (dpi) of the saved plot. Set to 96 by default.
-        save: bool, optional
-            Save the plot to a PNG file. True by default.
-        show: bool, optional
-            Show the plot in a separate window. False by default.
-        ax: uplt.Axes, optional
-            The axis, in case we are plotting this as part of another plot. Default is None.
-        saveto: str or Path
-            Path where to save the plot. Default is "dmtransform.png" in the current working directory.
-        """
-
-        def _plot(ax: uplt.Axes):
-            ax.format(xlabel=r"$\Delta t$ (in ms)", ylabel=r"DM (in pc cm$^{-3}$)")
-
-            ax.imshow(
-                self.data,
-                aspect="auto",
-                cmap="batlow",
-                interpolation="none",
-                extent=(
-                    self.times[0],
-                    self.times[-1],
-                    self.dms[-1],
-                    self.dms[0],
-                ),
-                vmin=float(self.data.mean() - 5 * self.data.std()),
-                vmax=float(self.data.mean() + 5 * self.data.std()),
-            )
-
-        if ax is None:
-            if not show:
-                matplotlib.use("agg")
-            fig = uplt.figure()
-            ax = fig.subplot()
-            assert ax is not None
-            _plot(ax)
-            if save:
-                fig.savefig(saveto, dpi=dpi)
-            if show:
-                uplt.show()
-            uplt.close(fig)
-        else:
-            _plot(ax)
-
-    def save(self, fname: str | Path) -> None:
-        """
-        Save a DM transform to a HDF5 file.
-
-        Parameters
-        ----------
-        fname: str or Path
-            Path to save the HDF5 file to.
-        """
-        with h5.File(fname, "a") as f:
+    def save(self, fn: str | Path) -> None:
+        with h5.File(fn, "a") as f:
             f.attrs["nt"] = self.nt
             f.attrs["dt"] = self.dt
             f.attrs["dm"] = self.dm
             f.attrs["ddm"] = self.ddm
             f.attrs["ndms"] = self.ndms
-            f.attrs["dmlow"] = self.dmlow
-            f.attrs["dmhigh"] = self.dmhigh
+            f.attrs["lodm"] = self.lodm
+            f.attrs["hidm"] = self.hidm
             dmtset = f.create_dataset(
                 "data_dm_time",
                 data=self.data,
@@ -375,344 +177,688 @@ class DMTransform:
             dmtset.dims[0].label = b"dm"
             dmtset.dims[1].label = b"time"
 
+    def plot(
+        self,
+        ax: Axes | None = None,
+        show: bool = True,
+        save: str | Path | bool = False,
+        **kwargs,
+    ):
+        def plotter(ax):
+            hm = ax.imshow(
+                self.data,
+                cmap="batloww",
+                aspect="auto",
+                interpolation="none",
+                vmin=self.data.min(),
+                vmax=self.data.max(),
+                extent=(self.times[0], self.times[-1], self.dms[-1], self.dms[0]),
+            )
+            ax.colorbar(hm)
+            ax.format(ylabel=r"DM (pc cm$^{-3}$)", xlabel=r"$\Delta t$ (ms)")
+
+        if ax is None:
+            fig = getattr(uplt, "figure")(width=3.5, height=3.5)
+            ax = cast(Axes, fig.subplot())
+            plotter(ax)
+            if show:
+                getattr(uplt, "show")()
+            if save:
+                if not isinstance(save, str | Path):
+                    save = "dmtransform.png"
+                fig.savefig(save, dpi=kwargs.get("dpi", 150))
+        else:
+            plotter(ax)
+
 
 @dataclass
-class Candidate:
-    """
-    Represents a FRB candy-date.
+class Slice:
+    data: np.ndarray
+    fn: Path
 
-    Parameters
-    ----------
-    dm: float
-        The dispersion masure (DM) of the candy-date (in pc cm^-3).
-    t0: float
-        The arrival time of the candy-date (in seconds).
-    wbin: int
-        The width of the candy-date (in terms of number of bins/samples).
-    snr: float
-        The signal-to-noise ratio (SNR) of the candy-date.
-    extras: dict, optional
-        Any extra metadata about this candy-date. Typically includes metadata
-        obtained from the file from which the candy-date's data was obtained.
-        Including this is optional; by default, it is None.
-    dedispersed: np.ndarray, optional
-        The dedispersed dynamic spectrum. It is None by default, since it can
-        only be obtained after a candy-date has been processed. Otherwise it is
-        a 2D Numpy array.
-    dmtransform: np.ndarray, optional
-        The DM transform. It is None by default, since it can only be obtained
-        after a candy-date has been processed. Otherwise it is a 2D Numpy array.
-    """
+    nf: int
+    nt: int
+    df: float
+    dt: float
+    fh: float
+    fl: float
+    bw: float
+    nbits: int
+    tbeg: float
+    tend: float
+    extras: dict = field(default_factory=dict)
+
+    @classmethod
+    def load(cls, fn: str | Path) -> Self:
+        fn = Path(fn)
+        match fn.suffix:
+            case ".h5":
+                with h5.File(fn, "r") as f:
+                    extras = dict(f.attrs.items())
+                    data = np.asarray(f["data"])
+                    return cls(
+                        fn=fn,
+                        data=data,
+                        extras=extras,
+                        nf=int(extras["nf"]),
+                        nt=int(extras["nt"]),
+                        df=float(extras["df"]),
+                        dt=float(extras["dt"]),
+                        fh=float(extras["fh"]),
+                        fl=float(extras["fl"]),
+                        bw=float(extras["bw"]),
+                        nbits=int(extras["nt"]),
+                        tbeg=float(extras["tbeg"]),
+                        tend=float(extras["tend"]),
+                    )
+            case ".fil":
+                meta, data = readfil(fn)
+                nf, nt = data.shape
+
+                fh = meta["fch1"]
+                df = meta["foff"]
+                dt = meta["tsamp"]
+                nbits = meta["nbits"]
+
+                if df < 0:
+                    df = abs(df)
+                    bw = nf * df
+                    fl = fh - bw + (0.5 * df)
+                else:
+                    fl = fh
+                    bw = nf * df
+                    fh = fl + bw - (0.5 * df)
+
+                return cls(
+                    fn=fn,
+                    nf=nf,
+                    nt=nt,
+                    fh=fh,
+                    dt=dt,
+                    df=df,
+                    bw=bw,
+                    tbeg=0.0,
+                    data=data,
+                    extras=meta,
+                    nbits=nbits,
+                    tend=nt * dt,
+                    fl=fh - bw + (0.5 * df),
+                )
+            case _:
+                raise CandiesError("INVALID DATA FORMAT. ABORT.")
+
+    @property
+    def freqs(self) -> np.ndarray:
+        return np.linspace(self.fh, self.fl, self.nf)
+
+    @property
+    def times(self) -> np.ndarray:
+        ntmid = self.nt // 2
+        deltat = ntmid * self.dt * 1e3
+        return np.linspace(-deltat, +deltat, self.nt)
+
+    @property
+    def profile(self) -> np.ndarray:
+        return self.data.sum(0)
+
+    def store(self, fn: str | Path | None = None) -> None:
+        fn = Path(fn if fn is not None else self.fn)
+        match fn.suffix:
+            case ".h5":
+                with h5.File(fn, "w") as f:
+                    f.attrs["nf"] = self.nf
+                    f.attrs["nt"] = self.nt
+                    f.attrs["df"] = self.df
+                    f.attrs["dt"] = self.dt
+                    f.attrs["fh"] = self.fh
+                    f.attrs["tbeg"] = self.tbeg
+                    f.attrs["tend"] = self.tend
+                    f.attrs["nbits"] = self.nbits
+                    for key, value in self.extras.items():
+                        f.attrs[key] = value
+                    dataset = f.create_dataset(
+                        "data",
+                        data=self.data,
+                        compression="gzip",
+                        compression_opts=9,
+                        dtype=self.data.dtype,
+                    )
+                    dataset.dims[1].label = b"time"
+                    dataset.dims[0].label = b"frequency"
+            case ".fil":
+                hdr = {
+                    "nifs": 1,
+                    "data_type": 1,
+                    "fch1": self.fh,
+                    "foff": -self.df,
+                    "tsamp": self.dt,
+                    "nchans": self.nf,
+                    "nbits": self.nbits,
+                    "rawdatafile": str(fn),
+                    "tstart": self.extras.get("mjd", 0.0),
+                    "src_raj": self.extras.get("src_raj", 0.0),
+                    "src_dej": self.extras.get("src_dej", 0.0),
+                    "machine_id": self.extras.get("machine_id", 0),
+                    "barycentric": self.extras.get("barycentric", 0),
+                    "telescope_id": self.extras.get("telescope_id", 0),
+                    "pulsarcentric": self.extras.get("pulsarcentric", 0),
+                    "source_name": self.extras.get("source_name", "UNKNOWN"),
+                }
+                if (mjd := self.extras.get("mjd", None)) is not None:
+                    hdr["tstart"] = mjd
+                if (ra := self.extras.get("ra", None)) is not None:
+                    hdr["src_raj"] = float("".join(re.split(r"[hms]", ra)[:-1]))
+                if (dec := self.extras.get("ra", None)) is not None:
+                    hdr["src_dej"] = float("".join(re.split(r"[dms]", dec)[:-1]))
+                writefil(hdr, self.data, fn)
+            case _:
+                raise CandiesError("INVALID DATA FORMAT. ABORT.")
+
+    def plot(
+        self,
+        ax: Axes | None = None,
+        show: bool = True,
+        save: str | Path | bool = False,
+        **kwargs,
+    ):
+        def plotter(ax):
+            hm = ax.imshow(
+                self.data,
+                cmap="batloww",
+                aspect="auto",
+                vmin=self.data.min(),
+                vmax=self.data.max(),
+                extent=(self.times[0], self.times[-1], self.freqs[-1], self.freqs[0]),
+            )
+            ax.colorbar(hm)
+            ax.format(ylabel=r"$\nu$ (MHz)", xlabel=r"$\Delta t$ (ms)")
+
+        if ax is None:
+            fig = getattr(uplt, "figure")(width=3.5, height=3.5)
+            ax = cast(Axes, fig.subplot())
+            plotter(ax)
+            ax.format(suptitle=str(self.fn.name))
+            if show:
+                getattr(uplt, "show")()
+            if save:
+                if not isinstance(save, str | Path):
+                    save = self.fn.with_suffix(".png")
+                fig.savefig(save, dpi=kwargs.get("dpi", 150))
+        else:
+            plotter(ax)
+            ax.format(title=str(self.fn.name))
+
+
+@dataclass
+class Candy:
 
     dm: float
     t0: float
     wbin: int
     snr: float
-    fname: str | None = None
-    extras: dict | None = None
+
+    beam: int = 0
+    label: bool = False
+    probability: float = 0.0
+    sliced: Slice | None = None
     dedispersed: Dedispersed | None = None
     dmtransform: DMTransform | None = None
+    extras: dict = field(default_factory=dict)
 
-    def __str__(self) -> str:
-        mjd = self.extras.get("tstart", None) if self.extras is not None else None
+    @property
+    def id(self) -> str:
         return "".join(
             [
-                f"MJD{mjd:.7f}_" if mjd is not None else "",
+                (
+                    f"MJD{mjd:.7f}_"
+                    if (
+                        mjd := (
+                            self.extras.get("mjd", None)
+                            if self.extras is not None
+                            else None
+                        )
+                    )
+                    is not None
+                    else ""
+                ),
                 f"T{self.t0:.7f}_",
                 f"DM{self.dm:.5f}_",
                 f"SNR{self.snr:.5f}",
             ]
         )
 
+    def __str__(self) -> str:
+        return self.id
+
     def __repr__(self) -> str:
         return self.__str__()
 
     @classmethod
-    def load(cls, fname: str | Path):
-        """
-        Load a candy-date from a HDF5 file.
-
-        Parameters
-        ----------
-        fname: str or Path
-            Path to the HDF5 file.
-        """
-        with h5.File(fname, "r") as f:
-            attrs = {k: np.asarray(v) for k, v in f.attrs.items()}
-            self = cls(
+    def load(cls, fn: str | Path) -> Self:
+        fn = Path(fn)
+        with h5.File(fn, "r") as f:
+            attrs = dict(f.attrs.items())
+            return cls(
                 dm=float(attrs["dm"]),
                 t0=float(attrs["t0"]),
                 snr=float(attrs["snr"]),
                 wbin=int(attrs["wbin"]),
-                extras=dict(f["extras"].attrs),
+                label=bool(attrs["label"]),
+                dmtransform=DMTransform.load(fn=fn),
+                dedispersed=Dedispersed.load(fn=fn),
+                extras=dict(f["extras"].attrs.items()),
+                probability=float(attrs["probability"]),
             )
-        self.dmtransform = DMTransform.load(fname)
-        self.dedispersed = Dedispersed.load(fname)
-        return self
 
-    def plot(
-        self,
-        /,
-        dpi: int = 96,
-        save: bool = True,
-        show: bool = False,
-        saveto: str = "candidate.png",
-    ):
-        """
-        Plot a candy-date.
-
-        Parameters
-        ----------
-        dpi: int, optional
-            The dots per pixel (dpi) of the saved plot. Set to 96 by default.
-        save: bool, optional
-            Save the plot to a PNG file. True by default.
-        show: bool, optional
-            Show the plot in a separate window. False by default.
-        saveto: str or Path
-            Path where to save the plot. Default is "candidate.png" in the current working directory.
-        """
-        if (self.dedispersed is not None) and (self.dmtransform is not None):
-            if not show:
-                matplotlib.use("agg")
-            fig = uplt.figure(width=7.5, height=5, sharey=False)
-            gs = uplt.GridSpec(nrows=2, ncols=3)
-            axtab = fig.subplot(gs[:, -1])
-            axtop = fig.subplot(gs[0, :-1])
-            axbtm = fig.subplot(gs[1, :-1])
-            self.dedispersed.plot(ax=axtop)
-            self.dmtransform.plot(ax=axbtm)
-
-            labels = [
-                r"$t_{cand}$",
-                "DM",
-                "SNR",
-                r"$W_{bin}$",
-                r"$N_{t}$ (original)",
-                r"$N_{t}$ (downsampled)",
-                r"$N_{\nu}$ (downsampled)",
-                r"$\delta t$ (downsampled)",
-                r"$\delta \nu$ (downsampled)",
-                r"$\nu_{first}$",
-                r"$\nu_{last}$",
-                r"$N_{DM}$",
-                r"$\delta$DM",
-                r"$DM_{low}$",
-                r"$DM_{high}$",
-            ]
-
-            fields = [
-                [f"{self.t0:.2f} s"],
-                [f"{self.dm:.2f} pc cm$^{{-3}}$"],
-                [f"{self.snr:.2f}"],
-                [f"{self.wbin:d} bins"],
-                [
-                    f"{self.dedispersed.nt * (1 if self.wbin < 3 else int(self.wbin / 2)):d}"
-                ],
-                [f"{self.dedispersed.nt:d}"],
-                [f"{self.dedispersed.nf:d}"],
-                [rf"{self.dedispersed.dt * 1e6:.2f} $\mu$s"],
-                [f"{self.dedispersed.df * 1e3:.2f} kHz"],
-                [f"{self.dedispersed.fh:.2f} MHz"],
-                [f"{self.dedispersed.fl:.2f} MHz"],
-                [f"{self.dmtransform.ndms:d}"],
-                [f"{self.dmtransform.ddm:.2f} pc cm$^{{-3}}$"],
-                [f"{self.dmtransform.dmlow:.2f} pc cm$^{{-3}}$"],
-                [f"{self.dmtransform.dmhigh:.2f} pc cm$^{{-3}}$"],
-            ]
-
-            def sigproc_ra(ra: float):
-                """
-                Convert SIGPROC-style RA to an actual RA.
-                """
-                hh = int(ra / 1e4)
-                mm = int((ra - hh * 1e4) / 1e2)
-                ss = ra - hh * 1e4 - mm * 1e2
-                return hh, mm, ss
-
-            def sigproc_dec(dec: float):
-                """
-                Convert SIGPROC-style DEC to an actual DEC.
-                """
-                dd = int(dec / 1e4)
-                mm = int((dec - dd * 1e4) / 1e2)
-                ss = dec - np.abs(dd) * 1e4 - mm * 1e2
-                return dd, mm, ss
-
-            if self.extras is not None:
-                dtoriginal = self.extras["tsamp"]
-                nforiginal = self.extras["nchans"]
-                dforiginal = np.abs(self.extras["foff"])
-
-                labels.insert(5, r"$N_{\nu}$ (original)")
-                labels.insert(7, r"$\delta t$ (original)")
-                labels.insert(9, r"$\delta \nu$ (original)")
-
-                fields.insert(5, [f"{nforiginal:d}"])
-                fields.insert(7, [rf"{dtoriginal * 1e6:.2f} $\mu$s"])
-                fields.insert(9, [f"{dforiginal * 1e3:.2f} kHz"])
-
-                name = self.extras["source_name"]
-                ra = ":".join(map(str, sigproc_ra(self.extras["src_raj"])))
-                dec = ":".join(map(str, sigproc_dec(self.extras["src_dej"])))
-
-                labels.insert(0, "Source name")
-                labels.insert(1, "Right ascension, RA (J2000)")
-                labels.insert(2, "Declination, DEC (J2000)")
-
-                fields.insert(0, [f"{name:s}"])
-                fields.insert(1, [f"{ra:s}"])
-                fields.insert(2, [f"{dec:s}"])
-
-                title = self.extras.get("rawdatafile", "")
-                fig.format(suptitle=f"{title}")
-
-            axtab.axis("off")
-            table = axtab.table(
-                loc="center",
-                edges="closed",
-                cellText=fields,
-                rowLabels=labels,
-                cellLoc="center",
-            )
-            table.auto_set_font_size(False)
-
-            if save:
-                fig.savefig(saveto, dpi=dpi)
-            if show:
-                uplt.show()
-            uplt.close(fig)
-
-    def save(self, fname: str | Path) -> None:
-        """
-        Save a candy-date to a HDF5 file.
-
-        Parameters
-        ----------
-        fname: str or Path
-            Path to save the HDF5 file to.
-        """
-        with h5.File(fname, "w") as f:
+    def save(self, fn: str | Path | None = None) -> None:
+        if fn is not None:
+            fn = Path(fn)
+            if fn.is_dir():
+                fn = fn / (self.id + ".h5")
+        else:
+            fn = Path.cwd() / (self.id + ".h5")
+        with h5.File(fn, "w") as f:
             f.attrs["dm"] = self.dm
             f.attrs["t0"] = self.t0
             f.attrs["snr"] = self.snr
             f.attrs["wbin"] = self.wbin
+            f.attrs["label"] = self.label
+            f.attrs["probability"] = self.probability
+            group = f.create_group("extras")
+            for key, value in self.extras.items():
+                group.attrs[key] = value
             if self.dedispersed is not None:
-                self.dedispersed.save(fname)
+                self.dedispersed.save(fn=fn)
             if self.dmtransform is not None:
-                self.dmtransform.save(fname)
-            if self.extras is not None:
-                group = f.create_group("extras")
-                for key, value in self.extras.items():
-                    group.attrs[key] = value
+                self.dmtransform.save(fn=fn)
+
+    def plot(
+        self,
+        show: bool = True,
+        showdd: bool = True,
+        showdmt: bool = True,
+        showtable: bool = True,
+        showprofile: bool = True,
+        save: str | Path | bool = False,
+        **kwargs,
+    ):
+        if (self.dedispersed is not None) and (self.dmtransform is not None):
+            nrows, ncols = {
+                (1, 1, 1): (2, 3),
+                (1, 1, 0): (2, 2),
+                (1, 0, 0): (1, 2),
+                (0, 1, 0): (1, 2),
+                (0, 0, 1): (1, 1),
+                (1, 0, 1): (1, 3),
+                (0, 1, 1): (1, 3),
+            }[(showdd, showdmt, showtable)]
+            gs = uplt.GridSpec(nrows=nrows, ncols=ncols)
+
+            width, height = 2.5 * ncols, 3.0 * nrows
+            fig = getattr(uplt, "figure")(width=width, height=height, share=False)
+
+            if showdd:
+                axtop = fig.subplot(gs[0, 0:2])
+                self.dedispersed.plot(ax=axtop, showprofile=showprofile)
+
+            if showdmt:
+                axbtm = fig.subplot(gs[1 if showdd else 0, 0:2])
+                self.dmtransform.plot(ax=axbtm)
+
+            if showtable:
+                axtab = fig.subplot(gs[:, 2 if (showdd or showdmt) else 0])
+
+                cells = {}
+                cells["FRB or RFI?"] = [f"{'FRB' if self.label else 'RFI'}"]
+                cells["Probability"] = [f"{self.probability:.4f}"]
+                if len(hdr := self.extras) > 0:
+                    src = str(hdr.get("source", "NA"))
+                    ra = str(
+                        next((hdr[_] for _ in ["raj2000", "ra"] if _ in hdr), "NA")
+                    )
+                    dec = str(
+                        next((hdr[_] for _ in ["decj2000", "dec"] if _ in hdr), "NA")
+                    )
+                    cells["Source name"] = [src]
+                    cells["Right ascension, RA (J2000)"] = [ra]
+                    cells["Declination, DEC (J2000)"] = [dec]
+                cells[r"$t_{cand}$"] = [f"{self.t0:.2f} s"]
+                if len(hdr := self.extras) > 0:
+                    mjd = hdr.get("mjd", "NA")
+                    cells["MJD"] = [f"{mjd:.9f}" if isinstance(mjd, float) else mjd]
+                cells["DM"] = [f"{self.dm:.2f} pc cm$^{{-3}}$"]
+                cells["SNR"] = [f"{self.snr:.2f}"]
+                cells[r"$W_{bin}$"] = [f"{self.wbin:d} bins"]
+                cells[r"$N_{t}$ (original)"] = [
+                    f"{self.dedispersed.nt * (1 if self.wbin < 3 else int(self.wbin / 2)):d}"
+                ]
+                cells[r"$N_{t}$ (downsampled)"] = [f"{self.dedispersed.nt:d}"]
+                if len(hdr := self.extras) > 0:
+                    nforig = next((hdr[_] for _ in ["nf", "nchans"] if _ in hdr), "NA")
+                    cells[r"$N_{\nu}$ (original)"] = [
+                        f"{nforig:d}" if isinstance(nforig, int) else nforig
+                    ]
+                cells[r"$N_{\nu}$ (downsampled)"] = [f"{self.dedispersed.nf:d}"]
+                if len(hdr := self.extras) > 0:
+                    dtorig = next((hdr[_] for _ in ["dt", "tsamp"] if _ in hdr), "NA")
+                    cells[r"$\delta t$ (original)"] = [
+                        (
+                            rf"{dtorig * 1e6:.2f} $\mu$s"
+                            if isinstance(dtorig, float)
+                            else dtorig
+                        )
+                    ]
+                cells[r"$\delta t$ (downsampled)"] = [
+                    rf"{self.dedispersed.dt * 1e6:.2f} $\mu$s"
+                ]
+                if len(hdr := self.extras) > 0:
+                    dforig = next(
+                        (hdr[_] for _ in ["df", "foff", "chanwidth"] if _ in hdr),
+                        "NA",
+                    )
+                    cells[r"$\delta \nu$ (original)"] = [
+                        (
+                            f"{dforig * 1e3:.2f} kHz"
+                            if isinstance(dforig, float)
+                            else dforig
+                        )
+                    ]
+                cells[r"$\delta \nu$ (downsampled)"] = [
+                    f"{self.dedispersed.df * 1e3:.2f} kHz"
+                ]
+                cells[r"$\nu_{first}$"] = [f"{self.dedispersed.fh:.2f} MHz"]
+                cells[r"$\nu_{last}$"] = [f"{self.dedispersed.fl:.2f} MHz"]
+                cells[r"$N_{DM}$"] = [f"{self.dmtransform.ndms:d}"]
+                cells[r"$\delta$DM"] = [f"{self.dmtransform.ddm:.2f} pc cm$^{{-3}}$"]
+                cells[r"$DM_{low}$"] = [f"{self.dmtransform.lodm:.2f} pc cm$^{{-3}}$"]
+                cells[r"$DM_{high}$"] = [f"{self.dmtransform.hidm:.2f} pc cm$^{{-3}}$"]
+
+                axtab.axis("off")
+                table = axtab.table(
+                    loc="center",
+                    edges="closed",
+                    cellLoc="center",
+                    rowLabels=list(cells.keys()),
+                    cellText=list(cells.values()),
+                )
+                table.auto_set_font_size(False)
+
+            if len(hdr := self.extras) > 0:
+                titleparts = []
+                if (gtaccode := hdr.get("gtaccode", None)) is not None:
+                    titleparts.append(f"GTAC Code: {gtaccode}")
+
+                mjd = hdr.get("mjd", None)
+                if mjd is not None:
+                    timestamp = (
+                        pytz.utc.localize(
+                            cast(datetime, Time(mjd, format="mjd").to_datetime())
+                        )
+                        .astimezone(pytz.timezone("Asia/Kolkata"))
+                        .isoformat()
+                    )
+                    titleparts.append(f"Detected at {timestamp}")
+
+                if len(titleparts) > 0:
+                    fig.suptitle("\n".join(titleparts))
+
+            if show:
+                getattr(uplt, "show")()
+            if save:
+                if not isinstance(save, str | Path):
+                    save = f"{self.id}.png"
+                fig.savefig(save, dpi=kwargs.get("dpi", 150))
+            uplt.close(fig)
+
+
+readers = Registry(prefix="read")
+
+
+@readers
+def readpandas(df: pd.DataFrame) -> list[Candy]:
+    return [
+        Candy(
+            dm=float(row["dm"]),
+            t0=float(row["t0"]),
+            snr=float(row["snr"]),
+            wbin=int(row["wbin"]),
+            extras={"datafile": str(fn)} if not pd.isnull(fn := row["fn"]) else {},  # type: ignore
+        )
+        for _, row in df.iterrows()
+    ]
+
+
+@readers
+def readyour(fn: str | Path) -> list[Candy]:
+    return [
+        Candy(
+            dm=float(row["dm"]),
+            snr=float(row["snr"]),
+            t0=float(row["stime"]),
+            wbin=int(row["width"]),
+            extras={"datafile": str(fn)} if not pd.isnull(fn := row["file"]) else {},  # type: ignore
+        )
+        for _, row in pd.read_csv(fn).iterrows()
+    ]
+
+
+@readers
+def readpresto(fn: str | Path) -> list[Candy]:
+    return [
+        Candy(
+            dm=float(row[0]),
+            t0=float(row[2]),
+            wbin=int(row[3]),
+            snr=float(row[1]),
+        )
+        for row in np.loadtxt(fn, usecols=(0, 1, 2, 4))
+    ]
+
+
+@readers
+def readastroacc(fn: str | Path) -> list[Candy]:
+    return [
+        Candy(
+            dm=float(row[0]),
+            t0=float(row[1]),
+            wbin=int(row[3]),
+            snr=float(row[2]),
+        )
+        for row in np.fromfile(fn, dtype=np.float32).reshape(-1, 4)
+    ]
+
+
+@readers
+def readtransientx(fn: str | Path) -> list[Candy]:
+    items = []
+    for _, row in pd.read_csv(
+        fn,
+        sep="\t",
+        names=[
+            "beam",
+            "id",
+            "stime",
+            "dm",
+            "width",
+            "snr",
+            "fh",
+            "fl",
+            "png",
+            "ddplanid",
+            "file",
+        ],
+    ).iterrows():
+        t0 = float(row["stime"])
+        try:
+            hdr = readhdr(row["file"])
+            t0 = t0 - hdr["mjd"]
+            wbin = int(float(row["width"]) / readhdr(row["file"])["dt"])
+            items.append(
+                Candy(
+                    t0=t0,
+                    wbin=wbin,
+                    dm=float(row["dm"]),
+                    snr=float(row["snr"]),
+                    extras={"datafile": str(row["file"])},
+                )
+            )
+        except Exception:
+            pass
+    if len(items) > 0:
+        return items
+    else:
+        raise CandiesError("DATAFILE NOT FOUND. ABORT.")
+
+
+@readers
+def readh5(fn: list[str | Path]) -> list[Candy]:
+    return [Candy.load(_) for _ in fn]
+
+
+writers = Registry(prefix="write")
+
+
+@writers
+def writepandas(items: list[Candy]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            (
+                {
+                    "dm": item.dm,
+                    "t0": item.t0,
+                    "snr": item.snr,
+                    "wbin": item.wbin,
+                    "fn": item.extras.get("datafile", pd.NA),
+                }
+            )
+            for item in items
+        ]
+    )
+
+
+@writers
+def writeyour(items: list[Candy], fn: str | Path) -> None:
+    pd.DataFrame(
+        [
+            (
+                {
+                    "file": str(item.extras.get("datafile", "")),
+                    "snr": item.snr,
+                    "stime": item.t0,
+                    "width": item.wbin,
+                    "dm": item.dm,
+                    "label": 0,
+                    "chan_mask_path": pd.NA,
+                    "num_files": 1,
+                }
+            )
+            for item in items
+        ]
+    ).to_csv(fn, index=False)
+
+
+@writers
+def writeh5(items: list[Candy], fn: str | Path | None = None) -> None:
+    for ix, candy in enumerate(items):
+        candy.save(fn=None if fn is None else f"{Path(fn).with_suffix('')}{ix}.h5")
 
 
 @dataclass
-class CandidateList(MutableSequence):
-    """
-    Represents a list of candy-dates.
+class Candies(MutableSequence):
 
-    Parameters
-    ----------
-    candy-dates: list[Candidate]
-        A list of candy-dates.
-    """
-
-    candidates: list[Candidate]
+    items: list[Candy]
 
     def __len__(self):
-        return len(self.candidates)
+        return len(self.items)
 
     def __getitem__(self, i):
-        return self.candidates[i]
+        return self.items[i]
 
     def __delitem__(self, i):
-        del self.candidates[i]
+        del self.items[i]
 
     def __setitem__(self, i, value):
-        self.candidates[i] = value
+        self.items[i] = value
 
-    def insert(self, index, value: Candidate):
-        """
-        Insert a candy-date into the list at a particular index.
+    def insert(self, index, value: Candy):
+        self.items.insert(index, value)
 
-        Parameters
-        ----------
-        index: int
-            The index at which to insert the candy-date.
-        value: Candidate
-            The candy-date to insert.
-        """
-        self.candidates.insert(index, value)
+    @property
+    def pandas(self) -> pd.DataFrame:
+        return writers["pandas"](self.items)
 
     @classmethod
-    def from_df(cls, df: pd.DataFrame):
-        """
-        Get a list of candy-dates from `pandas` DataFrame.
-
-        Parameters
-        ----------
-        df: pandas.DataFrame
-            The DataFrame which contains the list of candy-dates.
-        """
-        return cls(
-            candidates=[
-                Candidate(
-                    **(
+    def load(cls, x) -> Self:
+        if isinstance(x, str | Path):
+            return cls(
+                items=readers[
+                    (
                         {
-                            "fname": str(row.get("file", None)),
-                            "snr": float(row["snr"]),
-                            "t0": float(row["stime"]),
-                            "wbin": int(row["width"]),
-                            "dm": float(row["dm"]),
-                        }
+                            ".csv": "your",
+                            ".dat": "astroacc",
+                            ".json": "transientx",
+                            ".singlepulse": "presto",
+                        }[Path(x).suffix]
                     )
-                )
-                for _, row in df.iterrows()
-            ]
-        )
+                ](x)
+            )
+        elif isinstance(x, list):
+            if all(isinstance(_, str | Path) for _ in x):
+                return cls(items=readers["h5"](x))
+        elif isinstance(x, pd.DataFrame):
+            return cls(items=readers["pandas"](x))
+        raise CandiesError("INVALID INPUT FORMAT. ABORT.")
 
-    def to_df(self) -> pd.DataFrame:
-        """
-        Convert a list of candy-dates to a `pandas` DataFrame.
-        """
-        return pd.DataFrame(
-            [
+    def save(self, x) -> None:
+        if isinstance(x, str | Path):
+            writers[
                 (
                     {
-                        "file": candidate.fname,
-                        "snr": candidate.snr,
-                        "stime": candidate.t0,
-                        "width": candidate.wbin,
-                        "dm": candidate.dm,
-                        "label": 0,
-                        "chan_mask_path": pd.NA,
-                        "num_files": 1,
-                    }
+                        ".h5": "h5",
+                        ".csv": "your",
+                        ".dat": "astroacc",
+                        ".json": "transientx",
+                        ".singlepulse": "presto",
+                    }[Path(x).suffix]
                 )
-                for candidate in self.candidates
-            ]
-        )
+            ](self.items, x)
+        elif isinstance(x, list):
+            if all(isinstance(_, str | Path) for _ in x):
+                writers["h5"](self.items, x)
+        elif x is None:
+            writers["h5"](self.items)
+        raise CandiesError("INVALID OUTPUT FORMAT. ABORT.")
 
-    @classmethod
-    def from_csv(cls, fname: str | Path):
-        """
-        Get a list of candy-dates from a CSV file.
+    def show(self):
+        console = Console()
+        table = Table(expand=False, padding=(0, 2, 0, 2))
+        for i, item in enumerate(self.items):
+            datafile = item.extras.get("datafile", None)
+            if i == 0:
+                if datafile is not None:
+                    table.add_column("File")
+                table.add_column("DM (in pc cm^-3)")
+                table.add_column("Arrival time (in s)")
+                table.add_column("SNR")
+                table.add_column("Width (in bins)")
+            fields = [] if datafile is None else [datafile]
+            fields.extend(
+                [
+                    f"{item.dm:.2f}",
+                    f"{item.t0:.2f}",
+                    f"{item.snr:.2f}",
+                    f"{item.wbin:d}",
+                ]
+            )
+            table.add_row(*fields)
+        console.print(table)
 
-        Parameters
-        ----------
-        fname: str or Path
-            Path to the CSV file.
-        """
-        return cls.from_df(pd.read_csv(fname))
 
-    def to_csv(self, fname: str | Path) -> None:
-        """
-        Save a list of candy-dates to a CSV file.
-
-        Parameters
-        ----------
-        fname: str or Path
-            Path to the CSV file.
-        """
-        self.to_df().to_csv(fname)
+__all__ = [
+    "Slice",
+    "Candy",
+    "Candies",
+    "Dedispersed",
+    "DMTransform",
+    "CandiesError",
+]

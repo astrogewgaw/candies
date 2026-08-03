@@ -1,7 +1,8 @@
-"""
-candies: Sweet, sweet candy-dates!
-"""
+from optional_dependencies import auto, OptionalDependencyEnum
 
-from rich.traceback import install
 
-install(show_locals=True)
+class OptDeps(OptionalDependencyEnum):
+    SHAZAM = auto()
+
+
+__all__ = ["OptDeps"]
