@@ -26,17 +26,15 @@ def make(
     from candies.interfaces import FileInterface
     from candies.base import Candies, CandiesError
 
-    candies = Candies.load(candidates)
-
-    df = candies.pandas
+    df = Candies.load(candidates).pandas
     if datafile is not None:
         df["fn"] = df["fn"].fillna(str(datafile))
 
     for fn, group in df.groupby("fn"):
         try:
             made = []
-            for _, batch in group.groupby(np.arange(len(group) // batchsize)):
-                made.append(
+            for _, batch in group.groupby(np.arange(len(group)) // batchsize):
+                made.extend(
                     featurize(
                         zoom=zoom,
                         njobs=njobs,

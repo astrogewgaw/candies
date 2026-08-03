@@ -19,14 +19,16 @@ def label(
     from candies.base import Candies
     from candies.classify import classify
 
-    candies = Candies.load(candidates)
-    candies = classify(
-        gpuid=gpuid,
-        modelid=model,
-        candies=candies,
-        batchsize=batchsize,
-    )
-    for candy in track(candies, description="Saving...", transient=True):
+    for candy in track(
+        classify(
+            gpuid=gpuid,
+            modelid=model,
+            batchsize=batchsize,
+            candies=Candies.load(candidates),
+        ),
+        description="Saving...",
+        transient=True,
+    ):
         candy.save(fn=out)
 
 
